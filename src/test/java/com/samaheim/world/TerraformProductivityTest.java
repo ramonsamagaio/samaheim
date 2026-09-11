@@ -36,4 +36,15 @@ final class TerraformProductivityTest {
                 0f, 0f, h, TerraformToolSystem.DEFAULT_RADIUS, 0, 100f);
         if (!result.applied()) assertEquals(0f, result.staminaSpent(), 0.0001f);
     }
+
+    @Test
+    void clippedBrushNearWorldEdgeIsRejectedWithoutMutation() {
+        TerrainState terrain = new TerrainState(71L, 32f, 64, 8f);
+        String before = terrain.encodeDeltas();
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.RAISE,
+                31f, 0f, terrain.sampleHeight(31f, 0f), TerraformToolSystem.DEFAULT_RADIUS, 20, 100f);
+        assertFalse(result.applied());
+        assertEquals(0, result.stoneSpent());
+        assertEquals(before, terrain.encodeDeltas());
+    }
 }
