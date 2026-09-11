@@ -14,12 +14,7 @@ public final class SandboxPhysics {
     public record HorizontalResult(float x, float z, boolean blocked) {}
     public record VerticalResult(float eyeY, float velocityY, boolean grounded) {}
 
-    /**
-     * Swept horizontal movement with small substeps. The old implementation only
-     * checked the end position, so a fast sprint frame could tunnel through a tree
-     * or thin build blocker. Each substep depenetrates iteratively, producing a
-     * stable slide around overlapping circular blockers.
-     */
+    /** Swept horizontal collision prevents fast runtime movement tunneling through blockers. */
     public static HorizontalResult resolveHorizontal(float fromX, float fromZ, float toX, float toZ,
                                                      float playerRadius, List<CircleBlocker> blockers) {
         if (!Float.isFinite(fromX) || !Float.isFinite(fromZ) || !Float.isFinite(toX) || !Float.isFinite(toZ)) {
@@ -80,11 +75,7 @@ public final class SandboxPhysics {
         return new Depenetration(x, z, blocked);
     }
 
-    /**
-     * Stable vertical integration for the first-person runtime. dt is clamped so
-     * a hitch cannot teleport the player through the ground. Jump impulse is only
-     * accepted while grounded.
-     */
+    /** Stable vertical integration against the edited heightfield. */
     public static VerticalResult stepVertical(float currentEyeY, float velocityY, float groundY, float eyeHeight,
                                               boolean jumpRequested, float dt) {
         if (!Float.isFinite(currentEyeY) || !Float.isFinite(velocityY) || !Float.isFinite(groundY)
@@ -98,11 +89,12 @@ public final class SandboxPhysics {
         boolean grounded = currentEyeY <= floorEye + 0.055f && velocityY <= 0.15f;
         float nextVelocity = velocityY;
         if (grounded) {
-            currentEyeY = Math.max(currentEyeY, floorEye);
             if (jumpRequested) {
+                currentEyeY = Math.max(currentEyeY, floorEye);
                 nextVelocity = 6.2f;
                 grounded = false;
             } else {
+                currentEyeY = floorEye;
                 nextVelocity = 0f;
             }
         }
