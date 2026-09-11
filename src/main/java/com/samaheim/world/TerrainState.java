@@ -2,18 +2,11 @@ package com.samaheim.world;
 
 import java.util.Locale;
 
-/**
- * Editable terrain represented as three layers:
- * generated base -> coarse sculpt delta -> fine leveling offset.
- *
- * Coarse sculpting mirrors raise/pickaxe style edits and is capped against the
- * original generated terrain. Fine leveling is deliberately much narrower and
- * rides on top of the sculpted surface, matching the feel of using a hoe to
- * flatten around the altitude where the player is standing.
- */
+/** Editable generated terrain with coarse sculpting plus a fine leveling layer. */
 public final class TerrainState {
     private static final float EPSILON = 0.0005f;
     private static final float MAX_LEVEL_OFFSET = 1.0f;
+    private static final float TARGET_SAMPLE_SPACING = 1.0f;
 
     private final float halfExtent;
     private final int cells;
@@ -24,12 +17,13 @@ public final class TerrainState {
     private final float[] sculptDeltas;
     private final float[] levelOffsets;
 
-    public TerrainState(long seed, float halfExtent, int cells, float maxDelta) {
-        if (halfExtent <= 0f || cells < 2 || maxDelta <= 0f) {
+    public TerrainState(long seed, float halfExtent, int minimumCells, float maxDelta) {
+        if (halfExtent <= 0f || minimumCells < 2 || maxDelta <= 0f) {
             throw new IllegalArgumentException("Invalid terrain dimensions");
         }
         this.halfExtent = halfExtent;
-        this.cells = cells;
+        int oneMeterCells = (int) Math.ceil((halfExtent * 2f) / TARGET_SAMPLE_SPACING);
+        this.cells = Math.max(minimumCells, oneMeterCells);
         this.width = cells + 1;
         this.cellSize = (halfExtent * 2f) / cells;
         this.maxDelta = maxDelta;
@@ -91,10 +85,6 @@ public final class TerrainState {
         return sculptBrush(worldX, worldZ, radius, -Math.abs(amount));
     }
 
-    /**
-     * Fine leveling toward a reference altitude. Unlike coarse sculpting, the
-     * hoe layer can only move +/-1m away from the current sculpted surface.
-     */
     public int level(float worldX, float worldZ, float radius, float targetHeight, float maxStep) {
         if (radius <= 0f || maxStep <= 0f) return 0;
         int changed = 0;
@@ -106,7 +96,6 @@ public final class TerrainState {
                 float wx = vertexWorldX(x);
                 float distance = distance(wx, wz, worldX, worldZ);
                 if (distance > radius) continue;
-
                 float weight = brushWeight(distance, radius);
                 int i = index(x, z);
                 float sculpted = baseHeights[i] + sculptDeltas[i];
@@ -120,7 +109,6 @@ public final class TerrainState {
         return changed;
     }
 
-    /** Restores both coarse and fine modifications toward the generated world. */
     public int restore(float worldX, float worldZ, float radius, float strength) {
         if (radius <= 0f || strength <= 0f) return 0;
         int changed = 0;
@@ -144,10 +132,6 @@ public final class TerrainState {
         return changed;
     }
 
-    /**
-     * Sparse save format. s:index:value stores coarse sculpting and l:index:value
-     * stores leveling. Legacy index:value entries are accepted as sculpt edits.
-     */
     public String encodeDeltas() {
         StringBuilder out = new StringBuilder();
         for (int i = 0; i < sculptDeltas.length; i++) {
@@ -171,12 +155,10 @@ public final class TerrainState {
                 } else if (parts.length == 2) {
                     int i = Integer.parseInt(parts[0]);
                     float value = Float.parseFloat(parts[1]);
-                    if (i >= 0 && i < sculptDeltas.length && Float.isFinite(value)) {
-                        sculptDeltas[i] = clamp(value, -maxDelta, maxDelta);
-                    }
+                    if (i >= 0 && i < sculptDeltas.length && Float.isFinite(value)) sculptDeltas[i] = clamp(value, -maxDelta, maxDelta);
                 }
             } catch (NumberFormatException ignored) {
-                // A corrupt sample should not invalidate the entire world save.
+                // Ignore an individual damaged terrain sample instead of losing the save.
             }
         }
     }
@@ -193,7 +175,12 @@ public final class TerrainState {
                 float distance = distance(wx, wz, worldX, worldZ);
                 if (distance > radius) continue;
                 int i = index(x, z);
-                if (setSculptDelta(i, sculptDeltas[i] + amount * brushWeight(distance, radius))) changed++;
+                float weight = brushWeight(distance, radius);
+                if (setSculptDelta(i, sculptDeltas[i] + amount * weight)) {
+                    // A coarse raise/dig establishes a new real surface at this sample.
+                    levelOffsets[i] = moveToward(levelOffsets[i], 0f, Math.abs(amount) * weight);
+                    changed++;
+                }
             }
         }
         return changed;
@@ -225,7 +212,9 @@ public final class TerrainState {
 
     private static float brushWeight(float distance, float radius) {
         float n = clamp(distance / radius, 0f, 1f);
-        float smooth = n * n * (3f - 2f * n);
+        if (n <= 0.35f) return 1f;
+        float edge = (n - 0.35f) / 0.65f;
+        float smooth = edge * edge * (3f - 2f * edge);
         return 1f - smooth;
     }
 
