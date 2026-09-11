@@ -26,4 +26,14 @@ final class TerraformProductivityTest {
         assertTrue(result.stoneSpent() >= 1);
         assertTrue(result.staminaSpent() > 0f);
     }
+
+    @Test
+    void levelOnAlreadyMatchedPatchDoesNotWasteStamina() {
+        TerrainState terrain = new TerrainState(31L, 32f, 64, 8f);
+        float h = terrain.sampleHeight(0f, 0f);
+        for (int i = 0; i < 24; i++) terrain.level(0f, 0f, 3f, h, 1f);
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.LEVEL,
+                0f, 0f, h, TerraformToolSystem.DEFAULT_RADIUS, 0, 100f);
+        if (!result.applied()) assertEquals(0f, result.staminaSpent(), 0.0001f);
+    }
 }
