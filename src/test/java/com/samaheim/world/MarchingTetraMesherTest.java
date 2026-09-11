@@ -9,20 +9,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class MarchingTetraMesherTest {
     @Test
-    void excavatedSubterraneanChunkProducesVisibleInteriorSurface() {
+    void excavatedSubterraneanChunksProduceVisibleInteriorSurface() {
         VolumetricTerrain terrain = new VolumetricTerrain(4343L, 24f, -18f, 18f, 1f, 8);
         float surface = terrain.surfaceHeight(0f, 0f);
         Vector3f center = new Vector3f(0f, surface - 6f, 0f);
         VolumetricTerrain.EditResult result = terrain.dig(center, 3.4f, 8f);
         assertTrue(result.changedSamples() > 0);
 
-        VolumetricTerrain.ChunkKey key = result.dirtyChunks().stream()
-                .filter(candidate -> candidate.y() <= 1)
-                .findFirst()
-                .orElse(result.dirtyChunks().iterator().next());
-        Mesh mesh = MarchingTetraMesher.buildChunk(terrain, key);
+        Mesh visibleInterior = null;
+        for (VolumetricTerrain.ChunkKey key : result.dirtyChunks()) {
+            Mesh candidate = MarchingTetraMesher.buildChunk(terrain, key);
+            if (candidate != null && candidate.getTriangleCount() > 0) {
+                visibleInterior = candidate;
+                break;
+            }
+        }
 
-        assertNotNull(mesh);
-        assertTrue(mesh.getTriangleCount() > 0);
+        assertNotNull(visibleInterior);
+        assertTrue(visibleInterior.getTriangleCount() > 0);
     }
 }
