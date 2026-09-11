@@ -14,7 +14,7 @@ public final class SandboxPhysics {
 
     public static HorizontalResult resolveHorizontal(float fromX,float fromZ,float toX,float toZ,float playerRadius,List<CircleBlocker> blockers){
         if(!Float.isFinite(fromX)||!Float.isFinite(fromZ)||!Float.isFinite(toX)||!Float.isFinite(toZ))return new HorizontalResult(fromX,fromZ,true);
-        List<CircleBlocker> safe=blockers==null?List.of():blockers; float radius=Float.isFinite(playerRadius)?Math.max(0f,playerRadius):0f;
+        List<CircleBlocker> safe=blockers==null?List.of():blockers;float radius=Float.isFinite(playerRadius)?Math.max(0f,playerRadius):0f;
         float dx=toX-fromX,dz=toZ-fromZ,d=(float)Math.sqrt(dx*dx+dz*dz);int steps=Math.max(1,(int)Math.ceil(d/MAX_HORIZONTAL_STEP));
         float sx=dx/steps,sz=dz/steps,x=fromX,z=fromZ;boolean blocked=false;
         for(int i=0;i<steps;i++){
@@ -30,14 +30,21 @@ public final class SandboxPhysics {
 
     private static Depenetration depenetrate(float cx,float cz,float fx,float fz,float playerRadius,List<CircleBlocker> blockers){
         float x=cx,z=cz;boolean blocked=false;
-        for(int pass=0;pass<MAX_DEPENETRATION_PASSES;pass++){CircleBlocker chosen=null;float chosenPen=0f;
-            for(CircleBlocker b:blockers){if(!valid(b))continue;float min=playerRadius+Math.max(0f,b.radius())+COLLISION_SKIN;if(min<=EPS)continue;
-                float dx=x-b.x(),dz=z-b.z(),dist=(float)Math.sqrt(Math.max(0f,dx*dx+dz*dz)),pen=min-dist;
-                if(pen>EPS&&(chosen==null||pen>chosenPen+EPS||(Math.abs(pen-chosenPen)<=EPS&&tieBefore(b,chosen)))){chosen=b;chosenPen=pen;}}
-            if(chosen==null)break;blocked=true;float dx=x-chosen.x(),dz=z-chosen.z(),dist=(float)Math.sqrt(dx*dx+dz*dz);
+        for(int pass=0;pass<MAX_DEPENETRATION_PASSES;pass++){CircleBlocker chosen=deepestOverlap(x,z,playerRadius,blockers);if(chosen==null)break;blocked=true;
+            float dx=x-chosen.x(),dz=z-chosen.z(),dist=(float)Math.sqrt(dx*dx+dz*dz);
             if(dist<=EPS){dx=fx-chosen.x();dz=fz-chosen.z();dist=(float)Math.sqrt(dx*dx+dz*dz);if(dist<=EPS){dx=1f;dz=0f;dist=1f;}}
-            float min=playerRadius+Math.max(0f,chosen.radius())+COLLISION_SKIN,push=min/dist;x=chosen.x()+dx*push;z=chosen.z()+dz*push;}
+            float min=playerRadius+Math.max(0f,chosen.radius())+COLLISION_SKIN,push=min/dist;x=chosen.x()+dx*push;z=chosen.z()+dz*push;
+        }
+        if(deepestOverlap(x,z,playerRadius,blockers)!=null){x=fx;z=fz;blocked=true;}
         return new Depenetration(x,z,blocked);
+    }
+
+    private static CircleBlocker deepestOverlap(float x,float z,float playerRadius,List<CircleBlocker> blockers){
+        CircleBlocker chosen=null;float chosenPen=0f;
+        for(CircleBlocker b:blockers){if(!valid(b))continue;float min=playerRadius+Math.max(0f,b.radius())+COLLISION_SKIN;if(min<=EPS)continue;
+            float dx=x-b.x(),dz=z-b.z(),dist=(float)Math.sqrt(Math.max(0f,dx*dx+dz*dz)),pen=min-dist;
+            if(pen>EPS&&(chosen==null||pen>chosenPen+EPS||(Math.abs(pen-chosenPen)<=EPS&&tieBefore(b,chosen)))){chosen=b;chosenPen=pen;}}
+        return chosen;
     }
     private static boolean valid(CircleBlocker b){return b!=null&&Float.isFinite(b.x())&&Float.isFinite(b.z())&&Float.isFinite(b.radius());}
     private static boolean tieBefore(CircleBlocker a,CircleBlocker b){return a.x()<b.x()||(a.x()==b.x()&&(a.z()<b.z()||(a.z()==b.z()&&a.radius()<b.radius())));}
@@ -51,6 +58,6 @@ public final class SandboxPhysics {
         if(!grounded)v=Math.max(TERMINAL_FALL_SPEED,v-GRAVITY*frame);float y=currentEyeY+v*frame;if(y<=floor){y=floor;v=0f;grounded=true;}return new VerticalResult(y,v,grounded);
     }
     public static float terminalFallSpeed(){return TERMINAL_FALL_SPEED;}public static float groundSnapDown(){return GROUND_SNAP_DOWN;}
-    private static float directionalProgress(float x,float z,float nx,float nz,float dx,float dz){float len=(float)Math.sqrt(dx*dx+dz*dz);if(len<=EPS)return 0f;return ((nx-x)*dx+(nz-z)*dz)/len;}
+    private static float directionalProgress(float x,float z,float nx,float nz,float dx,float dz){float len=(float)Math.sqrt(dx*dx+dz*dz);if(len<=EPS)return 0f;return((nx-x)*dx+(nz-z)*dz)/len;}
     private record Depenetration(float x,float z,boolean blocked){}
 }
