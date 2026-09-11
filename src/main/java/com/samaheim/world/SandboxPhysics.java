@@ -1,5 +1,6 @@
 package com.samaheim.world;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Small deterministic runtime physics layer for the current playable client. */
@@ -12,6 +13,8 @@ public final class SandboxPhysics {
 
     public record CircleBlocker(float x, float z, float radius) {}
     public record BoxBlocker(float x, float z, float halfX, float halfZ, float yawRadians) {}
+    public record HeightCircleBlocker(float x, float z, float radius, float minY, float maxY) {}
+    public record HeightBoxBlocker(float x, float z, float halfX, float halfZ, float yawRadians, float minY, float maxY) {}
     public record HorizontalResult(float x, float z, boolean blocked) {}
     public record VerticalResult(float eyeY, float velocityY, boolean grounded) {}
 
@@ -25,11 +28,50 @@ public final class SandboxPhysics {
     public static HorizontalResult resolveHorizontalMixed(float fromX, float fromZ, float toX, float toZ,
                                                           float playerRadius, List<CircleBlocker> circles,
                                                           List<BoxBlocker> boxes) {
+        return sweep(fromX, fromZ, toX, toZ, playerRadius,
+                circles == null ? List.of() : circles,
+                boxes == null ? List.of() : boxes);
+    }
+
+    /**
+     * Height-aware horizontal collision for a capsule-like actor. Only blockers whose vertical
+     * span overlaps the actor's body are considered. This lets actors walk below high roofs,
+     * over low trim, and use multi-level structures without invisible 2D walls.
+     */
+    public static HorizontalResult resolveCapsuleHorizontalMixed(float fromX, float fromZ, float toX, float toZ,
+                                                                 float playerRadius, float footY, float height,
+                                                                 List<HeightCircleBlocker> circles,
+                                                                 List<HeightBoxBlocker> boxes) {
+        if (!Float.isFinite(footY) || !Float.isFinite(height)) return new HorizontalResult(fromX, fromZ, true);
+        float actorMin = footY + 0.03f;
+        float actorMax = footY + Math.max(0.2f, height) - 0.03f;
+        List<CircleBlocker> activeCircles = new ArrayList<>();
+        if (circles != null) {
+            for (HeightCircleBlocker blocker : circles) {
+                if (blocker == null || !finite(blocker.x(), blocker.z(), blocker.radius(), blocker.minY(), blocker.maxY())) continue;
+                if (verticalOverlap(actorMin, actorMax, blocker.minY(), blocker.maxY())) {
+                    activeCircles.add(new CircleBlocker(blocker.x(), blocker.z(), blocker.radius()));
+                }
+            }
+        }
+        List<BoxBlocker> activeBoxes = new ArrayList<>();
+        if (boxes != null) {
+            for (HeightBoxBlocker blocker : boxes) {
+                if (blocker == null || !finite(blocker.x(), blocker.z(), blocker.halfX(), blocker.halfZ(), blocker.yawRadians(), blocker.minY(), blocker.maxY())) continue;
+                if (verticalOverlap(actorMin, actorMax, blocker.minY(), blocker.maxY())) {
+                    activeBoxes.add(new BoxBlocker(blocker.x(), blocker.z(), blocker.halfX(), blocker.halfZ(), blocker.yawRadians()));
+                }
+            }
+        }
+        return sweep(fromX, fromZ, toX, toZ, playerRadius, activeCircles, activeBoxes);
+    }
+
+    private static HorizontalResult sweep(float fromX, float fromZ, float toX, float toZ,
+                                          float playerRadius, List<CircleBlocker> circles,
+                                          List<BoxBlocker> boxes) {
         if (!Float.isFinite(fromX) || !Float.isFinite(fromZ) || !Float.isFinite(toX) || !Float.isFinite(toZ)) {
             return new HorizontalResult(fromX, fromZ, true);
         }
-        List<CircleBlocker> safeCircles = circles == null ? List.of() : circles;
-        List<BoxBlocker> safeBoxes = boxes == null ? List.of() : boxes;
         float dxTotal = toX - fromX;
         float dzTotal = toZ - fromZ;
         float distance = (float) Math.sqrt(dxTotal * dxTotal + dzTotal * dzTotal);
@@ -44,12 +86,18 @@ public final class SandboxPhysics {
             float candidateX = x + stepX;
             float candidateZ = z + stepZ;
             Depenetration dep = depenetrate(candidateX, candidateZ, x, z,
-                    Math.max(0f, playerRadius), safeCircles, safeBoxes);
+                    Math.max(0f, playerRadius), circles, boxes);
             x = dep.x;
             z = dep.z;
             blocked |= dep.blocked;
         }
         return new HorizontalResult(x, z, blocked);
+    }
+
+    private static boolean verticalOverlap(float actorMin, float actorMax, float blockerMin, float blockerMax) {
+        float min = Math.min(blockerMin, blockerMax);
+        float max = Math.max(blockerMin, blockerMax);
+        return actorMax > min + EPS && actorMin < max - EPS;
     }
 
     private static Depenetration depenetrate(float candidateX, float candidateZ, float fallbackX, float fallbackZ,
