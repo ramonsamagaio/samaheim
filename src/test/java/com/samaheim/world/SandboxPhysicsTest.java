@@ -33,7 +33,7 @@ final class SandboxPhysicsTest {
         var result = SandboxPhysics.resolveHorizontal(-4f, 0f, 4f, 0f, 0.42f,
                 List.of(new SandboxPhysics.CircleBlocker(0f, 0f, 0.55f)));
         assertTrue(result.blocked());
-        assertTrue(result.x() < 0f, "swept movement must remain on the approach side");
+        assertTrue(result.x() < 0f);
         assertTrue(Math.abs(result.x()) >= 0.96f);
     }
 
@@ -42,7 +42,7 @@ final class SandboxPhysicsTest {
         var result = SandboxPhysics.resolveHorizontal(-1.4f, -1.0f, 1.2f, 1.8f, 0.42f,
                 List.of(new SandboxPhysics.CircleBlocker(0f, 0f, 0.6f)));
         assertTrue(result.blocked());
-        assertTrue(result.z() > -0.4f, "collision should retain useful tangential movement");
+        assertTrue(result.z() > -0.4f);
     }
 
     @Test
@@ -56,6 +56,30 @@ final class SandboxPhysicsTest {
     }
 
     @Test
+    void orientedWallBlocksAcrossItsTrueThinShape() {
+        var wall = new SandboxPhysics.BoxBlocker(0f, 0f, 1.4f, 0.16f, 0f);
+        var result = SandboxPhysics.resolveHorizontalMixed(0f, -3f, 0f, 3f, 0.42f, List.of(), List.of(wall));
+        assertTrue(result.blocked());
+        assertTrue(result.z() < 0f);
+    }
+
+    @Test
+    void rotatedWallUsesRotatedFootprint() {
+        var wall = new SandboxPhysics.BoxBlocker(0f, 0f, 1.4f, 0.16f, (float) Math.toRadians(90));
+        var result = SandboxPhysics.resolveHorizontalMixed(-3f, 0f, 3f, 0f, 0.42f, List.of(), List.of(wall));
+        assertTrue(result.blocked());
+        assertTrue(result.x() < 0f);
+    }
+
+    @Test
+    void canPassAlongThinSideOfWallWithoutCircularPhantomCollision() {
+        var wall = new SandboxPhysics.BoxBlocker(0f, 0f, 1.4f, 0.16f, 0f);
+        var result = SandboxPhysics.resolveHorizontalMixed(-2.5f, 1.2f, 2.5f, 1.2f, 0.42f, List.of(), List.of(wall));
+        assertFalse(result.blocked());
+        assertEquals(2.5f, result.x(), 0.01f);
+    }
+
+    @Test
     void jumpLeavesGroundAndGravityBringsPlayerBack() {
         float eyeHeight = 1.72f;
         float y = eyeHeight;
@@ -63,13 +87,11 @@ final class SandboxPhysicsTest {
         var first = SandboxPhysics.stepVertical(y, velocity, 0f, eyeHeight, true, 1f / 60f);
         assertFalse(first.grounded());
         assertTrue(first.eyeY() > eyeHeight);
-        y = first.eyeY();
-        velocity = first.velocityY();
+        y = first.eyeY(); velocity = first.velocityY();
         SandboxPhysics.VerticalResult state = first;
         for (int i = 0; i < 240; i++) {
             state = SandboxPhysics.stepVertical(y, velocity, 0f, eyeHeight, false, 1f / 60f);
-            y = state.eyeY();
-            velocity = state.velocityY();
+            y = state.eyeY(); velocity = state.velocityY();
         }
         assertTrue(state.grounded());
         assertEquals(eyeHeight, state.eyeY(), 0.001f);
