@@ -2,120 +2,87 @@
 
 ## Target
 
-A score of **9/10 or better** means a new player can play for roughly one hour without a progression-blocking bug, without running out of meaningful goals, and without the core loop collapsing into a single repeated action.
+A score of **9/10 or better** means a new player can play for roughly one hour in the actual graphical build without a progression-blocking bug, without becoming stuck, and without the experience collapsing into obvious repetition.
 
-This score is deliberately stricter than "it launches".
+## Scoring rule
 
-## Rubric
+The score measures the **playable game**, not the number of classes, tests, systems or planned features in the repository.
 
-Each review scores ten areas from 0 to 1:
+- Headless rules do not count as gameplay until wired into runtime.
+- Unit tests can prove logic but cannot prove that the game feels good or is visually playable.
+- A feature existing in source code earns no gameplay credit if the player cannot use it in the running build.
+- Compilation/CI is a required gate, not a large score bonus.
+- Runtime-sensitive claims require runtime evidence.
+- 9/10 is impossible without an instrumented or human graphical session of roughly one hour.
 
-1. Boot/build reliability
-2. First-person controls and traversal
-3. World generation and exploration
-4. Resource gathering and survival
-5. Crafting and equipment progression
-6. Combat readability and enemy variety
-7. Building and home-base value
-8. POIs, dungeons, quests and discovery
-9. Save/load and progression integrity
-10. First-hour pacing and repetition resistance
+## Recalibration
 
-## Current review history
+The previous 3.8/10 and 5.4/10 assessments were inflated by counting prototype feature presence and headless rule systems as if they represented a mature playable game. They did not.
 
-### Pass 1 — repository bootstrap — 0.0 -> 3.1
+**Correct baseline before the terrain pass: 1.0/10.**
 
-The repository was empty. Added a Java 21/jMonkeyEngine project and a procedural first-person vertical slice with movement, survival meters, gathering, crafting, combat, day/night, enemies, landmarks, arcane seals, campfire placement, respawn, autosave and manual save.
+At that point Samaheim was an embryonic first-person prototype with primitive geometry, shallow combat/building, tiny content depth, no validated one-hour loop and no Valheim-class terrain interaction.
 
-### Pass 2 — progression integrity — 3.1 -> 3.3
+## Current focus: runtime terrain deformation
 
-Fixed an out-of-order Arcane Seal softlock and added a regression test.
+The terrain pass is intentionally aimed at one of the systems that gives Valheim its physical sandbox identity.
 
-### Pass 3 — compile/CI gate — 3.3 -> 3.8
+Implemented in source:
 
-Java 21 CI resolved jMonkeyEngine, compiled the game and passed the initial deterministic tests. Runtime playability remains a separate gate.
+1. Generated terrain now has an immutable original heightfield plus mutable per-sample deltas.
+2. Terrain edits are capped at +/-8 m relative to each sample's original generated height.
+3. Circular brushes use smooth falloff instead of editing a square block.
+4. Level mode moves the target ground toward the altitude under the player's feet.
+5. Raise mode costs stone and raises ground locally.
+6. Cut mode lowers ground locally.
+7. Restore mode blends edits back toward the original generated terrain.
+8. The editable grid is 160x160 cells over the current world instead of the earlier coarse static 80x80 terrain.
+9. The live player and enemies query the mutable heightfield for ground height.
+10. The terrain render mesh is rebuilt after a deformation so the visual surface follows the authoritative heightfield.
+11. Nearby natural props/enemies are re-snapped after local terrain edits; placed structures are intentionally not moved with the earth.
+12. Terrain deltas are serialized into the existing save file and reloaded with the world seed.
+13. Automated tests cover deformation caps, falloff, leveling, restore and save-data round trips.
 
-### Pass 4 — spawn safety and terrain traversal
+Controls in the terraform build:
 
-Added deterministic world bounds and slope-speed rules. Very steep slopes become impassable instead of silently allowing mountain-goat movement.
+- `3`: craft Mason's Hoe (5 wood, 2 stone)
+- `T`: cycle Level / Raise / Cut / Restore
+- `G`: apply the selected terrain operation in front of the player
+- Raise Ground consumes 2 stone per successful operation
 
-### Pass 5 — collision and anti-clipping
+## Score policy for this pass
 
-Added circle-obstacle movement resolution with axis sliding, plus regression coverage for obstacle blocking and world-edge clamping. Runtime wiring into the rendered player controller is still required before this earns full traversal credit.
+Do not move the project far above **1.x/10** simply because this terrain system compiles. The score can increase meaningfully only after the runtime interaction is visually tested and additional core systems reach comparable depth.
 
-### Pass 6 — combat rules
+Major blockers remain:
 
-Added explicit weapon damage, stamina costs and armor mitigation with diminishing returns and a non-zero minimum hit. This establishes measurable combat tiers rather than one opaque damage constant.
+- actual physical collision against trees, rocks, ruins and placed structures
+- proper character controller, gravity, jumping and fall behavior
+- tool/equipment selection and first-person animation
+- combat depth, hit reactions, blocking/dodging and enemy telegraphs
+- building pieces, snapping, support/stability and shelter value
+- persistent harvested resources and placed structures
+- large procedural world/chunk streaming rather than the current small bounded map
+- real biome transitions and resource progression
+- dungeon interiors and boss loop
+- audio, VFX, animation, models, UI and presentation
+- multiplayer/server architecture
+- one-hour graphical soak test
 
-### Pass 7 — renewable resource economy
+## Iteration workflow
 
-Added bounded respawn windows for berries, trees and rocks so a one-hour session has replenishment rules instead of permanent local depletion.
+For every development execution:
 
-### Pass 8 — world-state persistence model
-
-Added `WorldState` snapshots covering depleted resources, defeated unique enemies, discovered POIs, built structures, awakened seals and dungeon progress. Added round-trip and corruption regression tests.
-
-### Pass 9 — biome differentiation
-
-Added deterministic Greenwood, Mist Marsh, Ashen Highlands and Arcane Ruins assignment by world seed and position.
-
-### Pass 10 — building validity
-
-Added structure-placement checks for boundaries, terrain slope and blockers. This prevents impossible or overlapping placements at the rules layer.
-
-### Pass 11 — crafting tiers and equipment choices
-
-Added a progression catalog with starter blade/campfire/workbench plus Iron Sword, Leather Armor and Arcane Staff recipes. Advanced equipment is workbench-gated and material-gated.
-
-### Pass 12 — enemy roster and encounter variety
-
-Expanded the deterministic encounter roster to Goblin, Graveborn, Wolf, Cultist and Ogre, with biome-dependent composition and danger-tier scaling.
-
-### Pass 13 — procedural POI distribution
-
-Added a seeded `WorldPlanner` that requires spaced ruins, three shrines, iron camps, an arcane tower and a dungeon while preserving a safe spawn radius. Tiny invalid worlds fail explicitly instead of generating broken progression layouts.
-
-### Pass 14 — dungeon loop
-
-Added dungeon room-count rules, boss-gated completion and reward tiers based on depth cleared.
-
-### Pass 15 — night pressure and camp incentive
-
-Night uses a tighter encounter cadence and a higher enemy cap, while a camp safety radius suppresses encounter spawning near home.
-
-### Pass 16 — first-hour pacing
-
-Added deterministic first-hour milestones for starter craft, first POI, first seal, dungeon entry and dungeon boss to the headless pacing model.
-
-### Pass 17 — runtime budget audit
-
-Added hard caps for active enemies, dropped items, particles and structures per cell. Particle requests degrade with slow frame times rather than growing without bound.
-
-### Pass 18 — failure/recovery integrity
-
-World-state restoration rejects negative dungeon progress and invalid seal IDs; resource/structure flags can be reversed cleanly when resources respawn or structures are removed.
-
-### Pass 19 — 60-minute soak model
-
-Added a deterministic 3,600-second headless simulation asserting encounter cadence, night pressure, biome changes, resource respawns, danger escalation and milestone coverage. This is logic-level evidence only, not a substitute for a real graphical playtest.
-
-### Pass 20 — final audit for this execution — 3.8 -> 5.4 provisional
-
-The codebase is substantially safer to extend because major first-hour systems now have deterministic rules and regression tests. However, several of those rules are not yet wired into `SamaheimGame`'s rendered runtime, physical collision is not visually validated, the dungeon is not yet a playable interior, presentation remains primitive, and no real 60-minute graphical session has been completed.
-
-**Current honest score: 5.4/10, pending green CI for this pass set.** The score must not reach 9 until the runtime uses these systems and a real or equivalent instrumented one-hour session demonstrates stability and sufficient variety.
-
-## Next execution priorities
-
-1. Integrate `FirstHourRules.resolveMovement` and slope limits into the live player controller.
-2. Register tree/rock/ruin/building blockers from generated world objects.
-3. Move combat, encounter direction and resource respawn onto the deterministic rule layer.
-4. Persist `WorldState` through the save format and restore world changes on load.
-5. Render biome material/prop differences and consume `WorldPlanner` POIs in `buildWorld()`.
-6. Implement an actual dungeon entrance/interior/reward/exit loop.
-7. Add runtime instrumentation for crashes, stuck movement, progression state and encounter cadence.
-8. Complete a graphical 60-minute soak run before any 9/10 claim.
+1. Run/evaluate the actual current game state where possible.
+2. Assign a strict score based on what the player can really do.
+3. Identify the most damaging blocker versus the Valheim-like target.
+4. Implement a concrete runtime improvement.
+5. Add regression tests for deterministic logic.
+6. Compile/test in CI.
+7. Re-evaluate.
+8. If below 9/10, continue within the same execution, up to 20 improvement passes.
+9. Work is not considered delivered until it is present on `main`.
 
 ## Honesty rule
 
-Never raise the score based only on code existing. A feature only earns reliability credit after compilation/tests, and runtime-sensitive claims require actual runtime evidence. If that evidence is unavailable, mark the area unverified rather than pretending it passed.
+The repository can contain sophisticated architecture while the game is still 1/10. Score the game the player experiences, not the engineering hidden underneath it.
