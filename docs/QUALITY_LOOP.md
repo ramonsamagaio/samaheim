@@ -27,39 +27,94 @@ Each review scores ten areas from 0 to 1:
 
 The repository was empty. Added a Java 21/jMonkeyEngine project and a procedural first-person vertical slice with movement, survival meters, gathering, crafting, combat, day/night, enemies, landmarks, arcane seals, campfire placement, respawn, autosave and manual save.
 
-Biggest blockers after the pass: no runtime validation yet, simplistic collision, limited crafting/building, no real dungeon interior, primitive presentation.
-
 ### Pass 2 — progression integrity — 3.1 -> 3.3
 
-Found a genuine softlock: a player could activate all three Arcane Seals before reaching the seal quest, then arrive at that quest with no usable seals left. Reworked the progression machine so already-completed objectives advance automatically when their prerequisite stage is reached. Added a regression test for out-of-order completion.
+Fixed an out-of-order Arcane Seal softlock and added a regression test.
 
 ### Pass 3 — compile/CI gate — 3.3 -> 3.8
 
-Opened draft PR #1 so every working commit receives pull-request CI. The Java 21 build resolved the jMonkeyEngine dependencies successfully, compiled the game, and passed the deterministic unit tests. Build reliability is therefore verified rather than assumed. Runtime playability is still unverified and does not receive equivalent credit yet.
+Java 21 CI resolved jMonkeyEngine, compiled the game and passed the initial deterministic tests. Runtime playability remains a separate gate.
 
-## Mandatory remaining passes
+### Pass 4 — spawn safety and terrain traversal
 
-The loop must continue for up to 20 passes, stopping early only after the project is honestly at least 9/10 and has evidence supporting that score.
+Added deterministic world bounds and slope-speed rules. Very steep slopes become impassable instead of silently allowing mountain-goat movement.
 
-High-priority review order:
+### Pass 5 — collision and anti-clipping
 
-4. Spawn safety and terrain traversal
-5. Tree/rock/ruin collision and anti-clipping
-6. Combat hit feedback, telegraphing and death edge cases
-7. Resource economy and one-hour depletion/regrowth
-8. Save/load world-state integrity
-9. Biome differentiation
-10. Building placement and structural usefulness
-11. Crafting tiers and equipment choices
-12. Enemy roster and encounter variety
-13. Procedural POI distribution
-14. Real dungeon loop with entrance/reward/exit
-15. Night pressure and rest/home incentive
-16. Quest pacing and guidance without hand-holding
-17. Performance/allocation audit
-18. Failure/recovery and save corruption resilience
-19. 60-minute scripted soak-test checklist
-20. Final quality audit against the full rubric
+Added circle-obstacle movement resolution with axis sliding, plus regression coverage for obstacle blocking and world-edge clamping. Runtime wiring into the rendered player controller is still required before this earns full traversal credit.
+
+### Pass 6 — combat rules
+
+Added explicit weapon damage, stamina costs and armor mitigation with diminishing returns and a non-zero minimum hit. This establishes measurable combat tiers rather than one opaque damage constant.
+
+### Pass 7 — renewable resource economy
+
+Added bounded respawn windows for berries, trees and rocks so a one-hour session has replenishment rules instead of permanent local depletion.
+
+### Pass 8 — world-state persistence model
+
+Added `WorldState` snapshots covering depleted resources, defeated unique enemies, discovered POIs, built structures, awakened seals and dungeon progress. Added round-trip and corruption regression tests.
+
+### Pass 9 — biome differentiation
+
+Added deterministic Greenwood, Mist Marsh, Ashen Highlands and Arcane Ruins assignment by world seed and position.
+
+### Pass 10 — building validity
+
+Added structure-placement checks for boundaries, terrain slope and blockers. This prevents impossible or overlapping placements at the rules layer.
+
+### Pass 11 — crafting tiers and equipment choices
+
+Added a progression catalog with starter blade/campfire/workbench plus Iron Sword, Leather Armor and Arcane Staff recipes. Advanced equipment is workbench-gated and material-gated.
+
+### Pass 12 — enemy roster and encounter variety
+
+Expanded the deterministic encounter roster to Goblin, Graveborn, Wolf, Cultist and Ogre, with biome-dependent composition and danger-tier scaling.
+
+### Pass 13 — procedural POI distribution
+
+Added a seeded `WorldPlanner` that requires spaced ruins, three shrines, iron camps, an arcane tower and a dungeon while preserving a safe spawn radius. Tiny invalid worlds fail explicitly instead of generating broken progression layouts.
+
+### Pass 14 — dungeon loop
+
+Added dungeon room-count rules, boss-gated completion and reward tiers based on depth cleared.
+
+### Pass 15 — night pressure and camp incentive
+
+Night uses a tighter encounter cadence and a higher enemy cap, while a camp safety radius suppresses encounter spawning near home.
+
+### Pass 16 — first-hour pacing
+
+Added deterministic first-hour milestones for starter craft, first POI, first seal, dungeon entry and dungeon boss to the headless pacing model.
+
+### Pass 17 — runtime budget audit
+
+Added hard caps for active enemies, dropped items, particles and structures per cell. Particle requests degrade with slow frame times rather than growing without bound.
+
+### Pass 18 — failure/recovery integrity
+
+World-state restoration rejects negative dungeon progress and invalid seal IDs; resource/structure flags can be reversed cleanly when resources respawn or structures are removed.
+
+### Pass 19 — 60-minute soak model
+
+Added a deterministic 3,600-second headless simulation asserting encounter cadence, night pressure, biome changes, resource respawns, danger escalation and milestone coverage. This is logic-level evidence only, not a substitute for a real graphical playtest.
+
+### Pass 20 — final audit for this execution — 3.8 -> 5.4 provisional
+
+The codebase is substantially safer to extend because major first-hour systems now have deterministic rules and regression tests. However, several of those rules are not yet wired into `SamaheimGame`'s rendered runtime, physical collision is not visually validated, the dungeon is not yet a playable interior, presentation remains primitive, and no real 60-minute graphical session has been completed.
+
+**Current honest score: 5.4/10, pending green CI for this pass set.** The score must not reach 9 until the runtime uses these systems and a real or equivalent instrumented one-hour session demonstrates stability and sufficient variety.
+
+## Next execution priorities
+
+1. Integrate `FirstHourRules.resolveMovement` and slope limits into the live player controller.
+2. Register tree/rock/ruin/building blockers from generated world objects.
+3. Move combat, encounter direction and resource respawn onto the deterministic rule layer.
+4. Persist `WorldState` through the save format and restore world changes on load.
+5. Render biome material/prop differences and consume `WorldPlanner` POIs in `buildWorld()`.
+6. Implement an actual dungeon entrance/interior/reward/exit loop.
+7. Add runtime instrumentation for crashes, stuck movement, progression state and encounter cadence.
+8. Complete a graphical 60-minute soak run before any 9/10 claim.
 
 ## Honesty rule
 
