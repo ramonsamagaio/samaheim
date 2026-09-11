@@ -30,29 +30,27 @@ import com.jme3.util.BufferUtils;
 import com.samaheim.game.Inventory;
 import com.samaheim.game.ProgressionState;
 import com.samaheim.world.TerrainState;
+import com.samaheim.world.TerraformToolSystem;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
 
-/**
- * Current playable client. Terrain is an editable heightfield rather than a static visual mesh.
- */
+/** Current playable client with persistent, Valheim-style editable terrain. */
 public final class SamaheimTerraformGame extends SimpleApplication implements ActionListener {
     private static final float EYE_HEIGHT = 1.72f;
     private static final float WORLD_HALF_EXTENT = 116f;
     private static final int TERRAIN_CELLS = 160;
     private static final float TERRAIN_MAX_DELTA = 8f;
-    private static final float TERRAFORM_RADIUS = 2.8f;
-    private static final float TERRAFORM_DISTANCE = 4.2f;
+    private static final float TERRAFORM_DISTANCE = 6.2f;
     private static final float INTERACT_RANGE = 4.8f;
     private static final float ATTACK_RANGE = 3.6f;
     private static final float DAY_LENGTH_SECONDS = 900f;
@@ -66,6 +64,8 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
 
     private TerrainState terrain;
     private Geometry terrainGeometry;
+    private Mesh terrainMesh;
+    private Geometry terraformMarker;
     private BitmapText hudText;
     private BitmapText objectiveText;
     private BitmapText messageText;
@@ -117,6 +117,7 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
         configureInput();
         configureLighting();
         buildWorld();
+        createTerraformMarker();
         configureHud();
 
         if (save != null) {
@@ -208,12 +209,7 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
                 positions[vertex * 3] = wx;
                 positions[vertex * 3 + 1] = terrain.vertexHeight(x, z);
                 positions[vertex * 3 + 2] = wz;
-
-                int xl = Math.max(0, x - 1), xr = Math.min(cells, x + 1);
-                int zd = Math.max(0, z - 1), zu = Math.min(cells, z + 1);
-                float dx = terrain.vertexHeight(xl, z) - terrain.vertexHeight(xr, z);
-                float dz = terrain.vertexHeight(x, zd) - terrain.vertexHeight(x, zu);
-                Vector3f n = new Vector3f(dx, terrain.cellSize() * 2f, dz).normalizeLocal();
+                Vector3f n = terrainNormal(x, z);
                 normals[vertex * 3] = n.x;
                 normals[vertex * 3 + 1] = n.y;
                 normals[vertex * 3 + 2] = n.z;
@@ -230,15 +226,51 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
             }
         }
 
-        Mesh mesh = new Mesh();
-        mesh.setBuffer(VertexBuffer.Type.Position, 3, BufferUtils.createFloatBuffer(positions));
-        mesh.setBuffer(VertexBuffer.Type.Normal, 3, BufferUtils.createFloatBuffer(normals));
-        mesh.setBuffer(VertexBuffer.Type.Index, 3, BufferUtils.createIntBuffer(indices));
-        mesh.updateBound();
-        mesh.setStatic();
-        terrainGeometry = new Geometry("mutable-terrain", mesh);
+        terrainMesh = new Mesh();
+        terrainMesh.setBuffer(VertexBuffer.Type.Position, 3, BufferUtils.createFloatBuffer(positions));
+        terrainMesh.setBuffer(VertexBuffer.Type.Normal, 3, BufferUtils.createFloatBuffer(normals));
+        terrainMesh.setBuffer(VertexBuffer.Type.Index, 3, BufferUtils.createIntBuffer(indices));
+        terrainMesh.updateBound();
+        terrainMesh.setDynamic();
+        terrainGeometry = new Geometry("mutable-terrain", terrainMesh);
         terrainGeometry.setMaterial(litMaterial(new ColorRGBA(0.16f, 0.29f, 0.12f, 1f), 4f));
         rootNode.attachChild(terrainGeometry);
+        terrain.consumeDirtyRegion();
+    }
+
+    private Vector3f terrainNormal(int x, int z) {
+        int cells = terrain.cells();
+        int xl = Math.max(0, x - 1), xr = Math.min(cells, x + 1);
+        int zd = Math.max(0, z - 1), zu = Math.min(cells, z + 1);
+        float dx = terrain.vertexHeight(xl, z) - terrain.vertexHeight(xr, z);
+        float dz = terrain.vertexHeight(x, zd) - terrain.vertexHeight(x, zu);
+        return new Vector3f(dx, terrain.cellSize() * 2f, dz).normalizeLocal();
+    }
+
+    private void updateTerrainPatch(TerrainState.DirtyRegion region) {
+        if (region == null || terrainMesh == null) return;
+        FloatBuffer positions = (FloatBuffer) terrainMesh.getBuffer(VertexBuffer.Type.Position).getData();
+        FloatBuffer normals = (FloatBuffer) terrainMesh.getBuffer(VertexBuffer.Type.Normal).getData();
+        int width = terrain.width();
+        int minX = Math.max(0, region.minX() - 1);
+        int minZ = Math.max(0, region.minZ() - 1);
+        int maxX = Math.min(terrain.cells(), region.maxX() + 1);
+        int maxZ = Math.min(terrain.cells(), region.maxZ() + 1);
+
+        for (int z = minZ; z <= maxZ; z++) {
+            for (int x = minX; x <= maxX; x++) {
+                int vertex = z * width + x;
+                positions.put(vertex * 3 + 1, terrain.vertexHeight(x, z));
+                Vector3f n = terrainNormal(x, z);
+                normals.put(vertex * 3, n.x);
+                normals.put(vertex * 3 + 1, n.y);
+                normals.put(vertex * 3 + 2, n.z);
+            }
+        }
+        terrainMesh.getBuffer(VertexBuffer.Type.Position).setUpdateNeeded();
+        terrainMesh.getBuffer(VertexBuffer.Type.Normal).setUpdateNeeded();
+        terrainMesh.updateBound();
+        terrainGeometry.updateModelBound();
     }
 
     private Vector3f randomWorldPoint(Random random, float safeRadius) {
@@ -343,6 +375,13 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
         material.setColor("Color", color); return material;
     }
 
+    private void createTerraformMarker() {
+        terraformMarker = new Geometry("terraform-marker", new Sphere(8, 12, 0.16f));
+        terraformMarker.setMaterial(unshaded(terraformColor()));
+        terraformMarker.setCullHint(Spatial.CullHint.Always);
+        rootNode.attachChild(terraformMarker);
+    }
+
     private void configureHud() {
         BitmapFont font = assetManager.loadFont("Interface/Fonts/Default.fnt");
         hudText = new BitmapText(font); hudText.setSize(21f); hudText.setLocalTranslation(22f, cam.getHeight() - 24f, 0f); guiNode.attachChild(hudText);
@@ -379,7 +418,7 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
     public void simpleUpdate(float tpf) {
         attackCooldown = Math.max(0f, attackCooldown - tpf); messageClock = Math.max(0f, messageClock - tpf);
         autoSaveClock += tpf; enemySpawnClock += tpf;
-        updatePlayer(tpf); updateEnemies(tpf); updateSurvival(tpf); updateDayNight(tpf);
+        updatePlayer(tpf); updateEnemies(tpf); updateSurvival(tpf); updateDayNight(tpf); updateTerraformMarker();
         progression.updateFromInventory(inventory); updateHud();
         if (enemySpawnClock >= 70f && enemies.getQuantity() < 18) { enemySpawnClock = 0f; spawnRoamingEnemy(); }
         if (autoSaveClock >= 60f) { autoSaveClock = 0f; saveGameSilently(); }
@@ -406,7 +445,8 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
             next.x = Math.clamp(next.x, -WORLD_HALF_EXTENT + 3f, WORLD_HALF_EXTENT - 3f);
             next.z = Math.clamp(next.z, -WORLD_HALF_EXTENT + 3f, WORLD_HALF_EXTENT - 3f);
             float currentGround = ground(current.x, current.z); float nextGround = ground(next.x, next.z);
-            if (nextGround - currentGround <= 0.72f) {
+            float slope = terrain.slopeDegrees(next.x, next.z, 0.75f);
+            if (nextGround - currentGround <= 0.72f && slope <= 55f) {
                 next.y = nextGround + EYE_HEIGHT; cam.setLocation(next);
             }
         }
@@ -458,36 +498,83 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
 
     private void cycleTerraformMode() {
         if (!hasHoe) { announce("Craft the Mason's Hoe first [3]."); return; }
-        terraformMode = terraformMode.next(); announce("Terrain mode: " + terraformMode.label);
+        terraformMode = terraformMode.next();
+        terraformMarker.setMaterial(unshaded(terraformColor()));
+        announce("Terrain mode: " + terraformMode.label);
+    }
+
+    private Vector3f terraformTarget() {
+        if (terrainGeometry != null) {
+            Ray ray = new Ray(cam.getLocation(), cam.getDirection());
+            CollisionResults hits = new CollisionResults();
+            terrainGeometry.collideWith(ray, hits);
+            CollisionResult closest = hits.getClosestCollision();
+            if (closest != null && closest.getDistance() <= TERRAFORM_DISTANCE) {
+                Vector3f p = closest.getContactPoint().clone();
+                p.x = Math.clamp(p.x, -WORLD_HALF_EXTENT + 2f, WORLD_HALF_EXTENT - 2f);
+                p.z = Math.clamp(p.z, -WORLD_HALF_EXTENT + 2f, WORLD_HALF_EXTENT - 2f);
+                return p;
+            }
+        }
+        Vector3f forward = cam.getDirection().clone(); forward.y = 0f;
+        if (forward.lengthSquared() < 0.001f) return null;
+        forward.normalizeLocal();
+        Vector3f p = cam.getLocation().add(forward.mult(4.2f));
+        p.x = Math.clamp(p.x, -WORLD_HALF_EXTENT + 2f, WORLD_HALF_EXTENT - 2f);
+        p.z = Math.clamp(p.z, -WORLD_HALF_EXTENT + 2f, WORLD_HALF_EXTENT - 2f);
+        p.y = ground(p.x, p.z);
+        return p;
+    }
+
+    private void updateTerraformMarker() {
+        if (terraformMarker == null || !hasHoe) {
+            if (terraformMarker != null) terraformMarker.setCullHint(Spatial.CullHint.Always);
+            return;
+        }
+        Vector3f target = terraformTarget();
+        if (target == null) {
+            terraformMarker.setCullHint(Spatial.CullHint.Always);
+            return;
+        }
+        terraformMarker.setCullHint(Spatial.CullHint.Never);
+        terraformMarker.setLocalTranslation(target.x, target.y + 0.12f, target.z);
+    }
+
+    private ColorRGBA terraformColor() {
+        return switch (terraformMode) {
+            case LEVEL -> new ColorRGBA(0.92f, 0.82f, 0.28f, 1f);
+            case RAISE -> new ColorRGBA(0.35f, 0.82f, 0.30f, 1f);
+            case LOWER -> new ColorRGBA(0.85f, 0.28f, 0.22f, 1f);
+            case SMOOTH -> new ColorRGBA(0.26f, 0.72f, 0.88f, 1f);
+            case RESTORE -> new ColorRGBA(0.72f, 0.48f, 0.90f, 1f);
+        };
     }
 
     private void terraform() {
         if (!hasHoe) { announce("Craft the Mason's Hoe first [3]."); return; }
-        Vector3f forward = cam.getDirection().clone(); forward.y = 0f;
-        if (forward.lengthSquared() < 0.001f) return;
-        forward.normalizeLocal(); Vector3f target = cam.getLocation().add(forward.mult(TERRAFORM_DISTANCE));
-        target.x = Math.clamp(target.x, -WORLD_HALF_EXTENT + 2f, WORLD_HALF_EXTENT - 2f);
-        target.z = Math.clamp(target.z, -WORLD_HALF_EXTENT + 2f, WORLD_HALF_EXTENT - 2f);
+        Vector3f target = terraformTarget();
+        if (target == null) { announce("Aim at nearby ground."); return; }
 
-        int changed;
-        switch (terraformMode) {
-            case LEVEL -> {
-                float standingHeight = ground(cam.getLocation().x, cam.getLocation().z);
-                changed = terrain.level(target.x, target.z, TERRAFORM_RADIUS, standingHeight, 0.65f);
-            }
-            case RAISE -> {
-                if (!inventory.has(Inventory.Item.STONE, 2)) { announce("Raise ground requires 2 stone."); return; }
-                changed = terrain.raise(target.x, target.z, TERRAFORM_RADIUS, 0.62f);
-                if (changed > 0) inventory.consume(Inventory.Item.STONE, 2);
-            }
-            case LOWER -> changed = terrain.lower(target.x, target.z, TERRAFORM_RADIUS, 0.62f);
-            case RESTORE -> changed = terrain.restore(target.x, target.z, TERRAFORM_RADIUS, 0.8f);
-            default -> throw new IllegalStateException("Unknown terraform mode");
-        }
-        if (changed == 0) { announce("The ground cannot move further here."); return; }
-        rebuildTerrainMesh(); snapNaturalObjects(target.x, target.z, TERRAFORM_RADIUS + 1.3f);
+        float standingHeight = ground(cam.getLocation().x, cam.getLocation().z);
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(
+                terrain,
+                TerraformToolSystem.Mode.valueOf(terraformMode.name()),
+                target.x,
+                target.z,
+                standingHeight,
+                TerraformToolSystem.DEFAULT_RADIUS,
+                inventory.get(Inventory.Item.STONE),
+                stamina);
+
+        if (!result.applied()) { announce(result.message()); return; }
+        if (result.stoneSpent() > 0) inventory.consume(Inventory.Item.STONE, result.stoneSpent());
+        stamina = Math.max(0f, stamina - result.staminaSpent());
+
+        TerrainState.DirtyRegion dirty = terrain.consumeDirtyRegion();
+        updateTerrainPatch(dirty);
+        snapNaturalObjects(target.x, target.z, TerraformToolSystem.DEFAULT_RADIUS + 1.3f);
         Vector3f player = cam.getLocation(); player.y = ground(player.x, player.z) + EYE_HEIGHT; cam.setLocation(player);
-        announce(terraformMode.label + " changed " + changed + " terrain samples.");
+        announce(result.message());
     }
 
     private void snapNaturalObjects(float x, float z, float radius) {
@@ -565,6 +652,10 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
         if (campfireKits <= 0) { announce("Craft a campfire kit first [2]."); return; }
         Vector3f flat = cam.getDirection().clone(); flat.y = 0f; flat.normalizeLocal();
         Vector3f p = cam.getLocation().add(flat.mult(2.6f)); p.y = ground(p.x, p.z);
+        if (!terrain.isBuildable(p.x, p.z, 1.15f, 20f, 0.85f)) {
+            announce("Ground is too rough for a camp. Level it with the hoe.");
+            return;
+        }
         createCampfire(p); campfireKits--; progression.markCampBuilt(); announce("Camp established.");
     }
 
@@ -597,10 +688,12 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
     private void updateHud() {
         String time = dayClock > 0.52f && dayClock < 0.93f ? "Night" : "Day";
         String tool = hasHoe ? " | Hoe:" + terraformMode.label : " | No terrain tool";
+        float slope = terrain.slopeDegrees(cam.getLocation().x, cam.getLocation().z, 0.75f);
         hudText.setText("HP " + Math.round(health) + "   ST " + Math.round(stamina) + "   Hunger " + Math.round(hunger) + "   " + time
                 + "\nWood " + inventory.get(Inventory.Item.WOOD) + " | Stone " + inventory.get(Inventory.Item.STONE) + " | Berries "
                 + inventory.get(Inventory.Item.BERRY) + " | Dust " + inventory.get(Inventory.Item.ARCANE_DUST)
-                + (hasBlade ? " | Blade" : " | Bare hands") + tool);
+                + (hasBlade ? " | Blade" : " | Bare hands") + tool
+                + " | Slope " + Math.round(slope) + "deg | Edited " + terrain.modifiedSampleCount());
         objectiveText.setText("Quest: " + progression.objectiveText());
     }
 
@@ -633,12 +726,13 @@ public final class SamaheimTerraformGame extends SimpleApplication implements Ac
         progression.restore(save.stage(), save.defeatedGoblins(), save.arcaneSeals(), save.hasBlade(), save.campBuilt());
         Vector3f position = save.position(); position.x = Math.clamp(position.x, -WORLD_HALF_EXTENT + 3f, WORLD_HALF_EXTENT - 3f);
         position.z = Math.clamp(position.z, -WORLD_HALF_EXTENT + 3f, WORLD_HALF_EXTENT - 3f); position.y = ground(position.x, position.z) + EYE_HEIGHT; cam.setLocation(position);
+        if (terraformMarker != null) terraformMarker.setMaterial(unshaded(terraformColor()));
     }
 
     private enum Move { FORWARD, BACK, LEFT, RIGHT, SPRINT }
 
     private enum TerraformMode {
-        LEVEL("Level"), RAISE("Raise"), LOWER("Cut"), RESTORE("Restore");
+        LEVEL("Level"), RAISE("Raise"), LOWER("Cut"), SMOOTH("Smooth"), RESTORE("Restore");
         private final String label;
         TerraformMode(String label) { this.label = label; }
         TerraformMode next() { TerraformMode[] values = values(); return values[(ordinal() + 1) % values.length]; }
