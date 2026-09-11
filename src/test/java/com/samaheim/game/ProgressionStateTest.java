@@ -38,4 +38,25 @@ final class ProgressionStateTest {
         assertTrue(state.campBuilt());
         assertEquals(ProgressionState.Stage.SURVIVE_NIGHT, state.stage());
     }
+
+    @Test
+    void completingObjectivesOutOfOrderCannotSoftlockTheQuest() {
+        Inventory inventory = new Inventory();
+        ProgressionState state = new ProgressionState();
+
+        state.markArcaneSealFound();
+        state.markArcaneSealFound();
+        state.markArcaneSealFound();
+        state.markCampBuilt();
+        state.markGoblinDefeated();
+        state.markGoblinDefeated();
+        state.markGoblinDefeated();
+        state.markBladeCrafted();
+
+        inventory.add(Inventory.Item.WOOD, 8);
+        inventory.add(Inventory.Item.STONE, 4);
+        state.updateFromInventory(inventory);
+
+        assertEquals(ProgressionState.Stage.SURVIVE_NIGHT, state.stage());
+    }
 }
