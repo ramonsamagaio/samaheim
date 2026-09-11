@@ -15,6 +15,7 @@ public final class ProgressionState {
     private Stage stage = Stage.GATHER_SUPPLIES;
     private int defeatedGoblins;
     private int arcaneSeals;
+    private boolean suppliesGathered;
     private boolean bladeCrafted;
     private boolean campBuilt;
 
@@ -40,39 +41,50 @@ public final class ProgressionState {
 
     public void updateFromInventory(Inventory inventory) {
         Objects.requireNonNull(inventory, "inventory");
-        if (stage == Stage.GATHER_SUPPLIES
-                && inventory.has(Inventory.Item.WOOD, 8)
-                && inventory.has(Inventory.Item.STONE, 4)) {
-            stage = Stage.CRAFT_BLADE;
-        }
+        suppliesGathered |= inventory.has(Inventory.Item.WOOD, 8) && inventory.has(Inventory.Item.STONE, 4);
+        advanceSatisfiedObjectives();
     }
 
     public void markBladeCrafted() {
         bladeCrafted = true;
-        if (stage == Stage.CRAFT_BLADE) {
-            stage = Stage.DEFEAT_GOBLINS;
-        }
+        advanceSatisfiedObjectives();
     }
 
     public void markGoblinDefeated() {
         defeatedGoblins++;
-        if (stage == Stage.DEFEAT_GOBLINS && defeatedGoblins >= 3) {
-            stage = Stage.FIND_ARCANE_SEALS;
-        }
+        advanceSatisfiedObjectives();
     }
 
     public void markArcaneSealFound() {
         arcaneSeals = Math.min(3, arcaneSeals + 1);
-        if (stage == Stage.FIND_ARCANE_SEALS && arcaneSeals >= 3) {
-            stage = Stage.BUILD_CAMP;
-        }
+        advanceSatisfiedObjectives();
     }
 
     public void markCampBuilt() {
         campBuilt = true;
-        if (stage == Stage.BUILD_CAMP) {
-            stage = Stage.SURVIVE_NIGHT;
+        advanceSatisfiedObjectives();
+    }
+
+    private void advanceSatisfiedObjectives() {
+        boolean advanced;
+        do {
+            advanced = switch (stage) {
+                case GATHER_SUPPLIES -> advanceWhen(suppliesGathered, Stage.CRAFT_BLADE);
+                case CRAFT_BLADE -> advanceWhen(bladeCrafted, Stage.DEFEAT_GOBLINS);
+                case DEFEAT_GOBLINS -> advanceWhen(defeatedGoblins >= 3, Stage.FIND_ARCANE_SEALS);
+                case FIND_ARCANE_SEALS -> advanceWhen(arcaneSeals >= 3, Stage.BUILD_CAMP);
+                case BUILD_CAMP -> advanceWhen(campBuilt, Stage.SURVIVE_NIGHT);
+                case SURVIVE_NIGHT -> false;
+            };
+        } while (advanced);
+    }
+
+    private boolean advanceWhen(boolean condition, Stage next) {
+        if (!condition) {
+            return false;
         }
+        stage = next;
+        return true;
     }
 
     public String objectiveText() {
@@ -88,9 +100,11 @@ public final class ProgressionState {
 
     public void restore(Stage stage, int defeatedGoblins, int arcaneSeals, boolean bladeCrafted, boolean campBuilt) {
         this.stage = Objects.requireNonNull(stage, "stage");
+        this.suppliesGathered = stage != Stage.GATHER_SUPPLIES;
         this.defeatedGoblins = Math.max(0, defeatedGoblins);
         this.arcaneSeals = Math.clamp(arcaneSeals, 0, 3);
         this.bladeCrafted = bladeCrafted;
         this.campBuilt = campBuilt;
+        advanceSatisfiedObjectives();
     }
 }
