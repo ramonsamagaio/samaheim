@@ -80,6 +80,37 @@ final class SandboxPhysicsTest {
     }
 
     @Test
+    void capsuleIgnoresWallEntirelyAboveActorsHead() {
+        var wall = new SandboxPhysics.HeightBoxBlocker(0f, 0f, 1.4f, 0.16f, 0f, 3f, 5f);
+        var result = SandboxPhysics.resolveCapsuleHorizontalMixed(0f, -3f, 0f, 3f, 0.42f, 0f, 1.72f, List.of(), List.of(wall));
+        assertFalse(result.blocked());
+        assertEquals(3f, result.z(), 0.01f);
+    }
+
+    @Test
+    void capsuleBlocksWhenWallOverlapsTorso() {
+        var wall = new SandboxPhysics.HeightBoxBlocker(0f, 0f, 1.4f, 0.16f, 0f, 0f, 2.5f);
+        var result = SandboxPhysics.resolveCapsuleHorizontalMixed(0f, -3f, 0f, 3f, 0.42f, 0f, 1.72f, List.of(), List.of(wall));
+        assertTrue(result.blocked());
+        assertTrue(result.z() < 0f);
+    }
+
+    @Test
+    void capsuleCanStepAboveLowTrimWithoutPhantomWall() {
+        var trim = new SandboxPhysics.HeightBoxBlocker(0f, 0f, 1.4f, 0.16f, 0f, 0f, 0.2f);
+        var result = SandboxPhysics.resolveCapsuleHorizontalMixed(0f, -3f, 0f, 3f, 0.42f, 0.24f, 1.72f, List.of(), List.of(trim));
+        assertFalse(result.blocked());
+    }
+
+    @Test
+    void heightAwareTreeStillBlocksGroundedActor() {
+        var tree = new SandboxPhysics.HeightCircleBlocker(0f, 0f, 0.55f, 0f, 4f);
+        var result = SandboxPhysics.resolveCapsuleHorizontalMixed(-3f, 0f, 3f, 0f, 0.42f, 0f, 1.72f, List.of(tree), List.of());
+        assertTrue(result.blocked());
+        assertTrue(result.x() < 0f);
+    }
+
+    @Test
     void jumpLeavesGroundAndGravityBringsPlayerBack() {
         float eyeHeight = 1.72f;
         float y = eyeHeight;
