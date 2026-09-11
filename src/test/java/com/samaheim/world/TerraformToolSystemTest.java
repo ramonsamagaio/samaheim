@@ -11,9 +11,8 @@ final class TerraformToolSystemTest {
     void raisingWithoutStoneNeverMutatesTerrain() {
         TerrainState terrain = new TerrainState(5L, 32f, 64, 8f);
         float before = terrain.sampleHeight(0f, 0f);
-        TerraformToolSystem.Result result = TerraformToolSystem.apply(
-                terrain, TerraformToolSystem.Mode.RAISE, 0f, 0f, before,
-                TerraformToolSystem.DEFAULT_RADIUS, 1, 100f);
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.RAISE,
+                0f, 0f, before, TerraformToolSystem.DEFAULT_RADIUS, 1, 100f);
         assertFalse(result.applied());
         assertEquals(0, result.stoneSpent());
         assertEquals(before, terrain.sampleHeight(0f, 0f), 0.001f);
@@ -23,9 +22,8 @@ final class TerraformToolSystemTest {
     void successfulDefaultRaiseChargesResourcesOncePerStrike() {
         TerrainState terrain = new TerrainState(5L, 32f, 64, 8f);
         float before = terrain.sampleHeight(0f, 0f);
-        TerraformToolSystem.Result result = TerraformToolSystem.apply(
-                terrain, TerraformToolSystem.Mode.RAISE, 0f, 0f, before,
-                TerraformToolSystem.DEFAULT_RADIUS, 12, 100f);
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.RAISE,
+                0f, 0f, before, TerraformToolSystem.DEFAULT_RADIUS, 12, 100f);
         assertTrue(result.applied());
         assertTrue(result.changedSamples() > 1);
         assertEquals(2, result.stoneSpent());
@@ -34,11 +32,11 @@ final class TerraformToolSystemTest {
     }
 
     @Test
-    void wideRaiseCostsMoreStoneThanDefaultBrush() {
+    void wideRaiseCostsMoreStoneAndStaminaThanDefaultBrush() {
         TerrainState terrain = new TerrainState(21L, 32f, 64, 8f);
         float before = terrain.sampleHeight(0f, 0f);
-        TerraformToolSystem.Result result = TerraformToolSystem.apply(
-                terrain, TerraformToolSystem.Mode.RAISE, 0f, 0f, before, 4.2f, 20, 100f);
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.RAISE,
+                0f, 0f, before, 4.2f, 20, 100f);
         assertTrue(result.applied());
         assertTrue(result.stoneSpent() > 2);
         assertTrue(result.staminaSpent() > 7f);
@@ -48,8 +46,8 @@ final class TerraformToolSystemTest {
     void absurdBrushRadiusIsClampedInsteadOfEditingWholeWorld() {
         TerrainState terrain = new TerrainState(33L, 32f, 64, 8f);
         float before = terrain.sampleHeight(0f, 0f);
-        TerraformToolSystem.Result result = TerraformToolSystem.apply(
-                terrain, TerraformToolSystem.Mode.LOWER, 0f, 0f, before, 500f, 0, 100f);
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.LOWER,
+                0f, 0f, before, 500f, 0, 100f);
         assertTrue(result.applied());
         assertTrue(result.changedSamples() < terrain.width() * terrain.width() / 3);
     }
@@ -58,11 +56,24 @@ final class TerraformToolSystemTest {
     void exhaustedPlayerCannotTerraform() {
         TerrainState terrain = new TerrainState(8L, 32f, 64, 8f);
         float before = terrain.sampleHeight(0f, 0f);
-        TerraformToolSystem.Result result = TerraformToolSystem.apply(
-                terrain, TerraformToolSystem.Mode.LOWER, 0f, 0f, before,
-                TerraformToolSystem.DEFAULT_RADIUS, 0, 2f);
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.LOWER,
+                0f, 0f, before, TerraformToolSystem.DEFAULT_RADIUS, 0, 2f);
         assertFalse(result.applied());
+        assertEquals(0f, result.staminaSpent(), 0.001f);
         assertEquals(before, terrain.sampleHeight(0f, 0f), 0.001f);
+    }
+
+    @Test
+    void cappedTerrainDoesNotChargeAFailedRaise() {
+        TerrainState terrain = new TerrainState(44L, 32f, 64, 1.2f);
+        float reference = terrain.sampleHeight(0f, 0f);
+        for (int i = 0; i < 30; i++) terrain.raise(0f, 0f, TerraformToolSystem.DEFAULT_RADIUS, 1f);
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.RAISE,
+                0f, 0f, reference, TerraformToolSystem.DEFAULT_RADIUS, 50, 100f);
+        if (!result.applied()) {
+            assertEquals(0, result.stoneSpent());
+            assertEquals(0f, result.staminaSpent(), 0.001f);
+        }
     }
 
     @Test
@@ -79,7 +90,7 @@ final class TerraformToolSystemTest {
     }
 
     @Test
-    void smoothingRespondsMoreStronglyOnRoughGround() {
+    void smoothingDoesNotMakeRoughGroundWorse() {
         TerrainState terrain = new TerrainState(77L, 32f, 64, 8f);
         terrain.raise(0f, 0f, 1.2f, 2.5f);
         float roughBefore = terrain.heightVariation(0f, 0f, 2f);
@@ -94,13 +105,23 @@ final class TerraformToolSystemTest {
     void smoothAndRestoreDoNotChargeStone() {
         TerrainState terrain = new TerrainState(17L, 32f, 64, 8f);
         terrain.raise(0f, 0f, 1f, 2f);
-        TerraformToolSystem.Result smooth = TerraformToolSystem.apply(
-                terrain, TerraformToolSystem.Mode.SMOOTH, 0f, 0f, terrain.sampleHeight(0f, 0f),
-                TerraformToolSystem.DEFAULT_RADIUS, 0, 100f);
-        TerraformToolSystem.Result restore = TerraformToolSystem.apply(
-                terrain, TerraformToolSystem.Mode.RESTORE, 0f, 0f, terrain.sampleHeight(0f, 0f),
-                TerraformToolSystem.DEFAULT_RADIUS, 0, 100f);
+        TerraformToolSystem.Result smooth = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.SMOOTH,
+                0f, 0f, terrain.sampleHeight(0f, 0f), TerraformToolSystem.DEFAULT_RADIUS, 0, 100f);
+        TerraformToolSystem.Result restore = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.RESTORE,
+                0f, 0f, terrain.sampleHeight(0f, 0f), TerraformToolSystem.DEFAULT_RADIUS, 0, 100f);
         assertEquals(0, smooth.stoneSpent());
         assertEquals(0, restore.stoneSpent());
+    }
+
+    @Test
+    void invalidTargetCannotMutateTerrainOrSpendResources() {
+        TerrainState terrain = new TerrainState(1L, 32f, 64, 8f);
+        String before = terrain.encodeDeltas();
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.RAISE,
+                Float.NaN, 0f, 0f, 2.8f, 99, 99f);
+        assertFalse(result.applied());
+        assertEquals(0, result.stoneSpent());
+        assertEquals(0f, result.staminaSpent(), 0.001f);
+        assertEquals(before, terrain.encodeDeltas());
     }
 }
