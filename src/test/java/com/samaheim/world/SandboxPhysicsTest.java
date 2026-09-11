@@ -56,6 +56,22 @@ final class SandboxPhysicsTest {
     }
 
     @Test
+    void collisionSkinLeavesTinySeparationFromObstacle() {
+        var result = SandboxPhysics.resolveHorizontal(-2f, 0f, 0f, 0f, 0.42f,
+                List.of(new SandboxPhysics.CircleBlocker(0f, 0f, 0.58f)));
+        float distance = (float) Math.sqrt(result.x() * result.x() + result.z() * result.z());
+        assertTrue(distance >= 1.005f);
+    }
+
+    @Test
+    void invalidRadiusFailsSoftInsteadOfProducingNaN() {
+        var result = SandboxPhysics.resolveHorizontal(0f, 0f, 1f, 0f, Float.NaN,
+                List.of(new SandboxPhysics.CircleBlocker(5f, 0f, 1f)));
+        assertTrue(Float.isFinite(result.x()));
+        assertTrue(Float.isFinite(result.z()));
+    }
+
+    @Test
     void jumpLeavesGroundAndGravityBringsPlayerBack() {
         float eyeHeight = 1.72f;
         float y = eyeHeight;
