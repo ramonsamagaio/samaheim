@@ -264,6 +264,19 @@ public final class VolumetricTerrain {
             float surface = WorldMath.height(seed, worldX(x), worldZ(z));
             minSurface = Math.min(minSurface, surface); maxSurface = Math.max(maxSurface, surface);
         }
+        float chunkMinX = worldX(startX);
+        float chunkMaxX = worldX(endX);
+        float chunkMinZ = worldZ(startZ);
+        float chunkMaxZ = worldZ(endZ);
+        for (Edit edit : edits) {
+            float nearestX = clamp(edit.x, chunkMinX, chunkMaxX);
+            float nearestZ = clamp(edit.z, chunkMinZ, chunkMaxZ);
+            float dx = edit.x - nearestX;
+            float dz = edit.z - nearestZ;
+            if (dx * dx + dz * dz > edit.radius * edit.radius) continue;
+            minSurface = Math.min(minSurface, edit.y - edit.radius - spacing);
+            maxSurface = Math.max(maxSurface, edit.y + edit.radius + spacing);
+        }
         int minChunk = clamp(gridY(minSurface - spacing * 2f) / chunkCells, 0, chunkCountY() - 1);
         int maxChunk = clamp(gridY(maxSurface + spacing * 2f) / chunkCells, 0, chunkCountY() - 1);
         return new int[]{minChunk, maxChunk};
