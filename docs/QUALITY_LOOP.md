@@ -33,13 +33,16 @@ Biggest blockers after the pass: no runtime validation yet, simplistic collision
 
 Found a genuine softlock: a player could activate all three Arcane Seals before reaching the seal quest, then arrive at that quest with no usable seals left. Reworked the progression machine so already-completed objectives advance automatically when their prerequisite stage is reached. Added a regression test for out-of-order completion.
 
+### Pass 3 — compile/CI gate — 3.3 -> 3.8
+
+Opened draft PR #1 so every working commit receives pull-request CI. The Java 21 build resolved the jMonkeyEngine dependencies successfully, compiled the game, and passed the deterministic unit tests. Build reliability is therefore verified rather than assumed. Runtime playability is still unverified and does not receive equivalent credit yet.
+
 ## Mandatory remaining passes
 
 The loop must continue for up to 20 passes, stopping early only after the project is honestly at least 9/10 and has evidence supporting that score.
 
 High-priority review order:
 
-3. Compile/CI gate and dependency correctness
 4. Spawn safety and terrain traversal
 5. Tree/rock/ruin collision and anti-clipping
 6. Combat hit feedback, telegraphing and death edge cases
