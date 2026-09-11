@@ -48,7 +48,7 @@ public final class TerraformToolSystem {
 
         float radius = clamp(requestedRadius, MIN_RADIUS, MAX_RADIUS);
         float areaScale = clamp((radius * radius) / (DEFAULT_RADIUS * DEFAULT_RADIUS), 0.5f, 2.25f);
-        int stoneCost = mode == Mode.RAISE ? Math.max(1, Math.round(mode.stoneCost() * areaScale)) : 0;
+        int quotedStoneCost = mode == Mode.RAISE ? Math.max(1, Math.round(mode.stoneCost() * areaScale)) : 0;
         float slope = terrain.slopeDegrees(worldX, worldZ, Math.max(0.7f, radius * 0.35f));
         float roughness = terrain.heightVariation(worldX, worldZ, Math.max(0.8f, radius * 0.45f));
 
@@ -59,12 +59,12 @@ public final class TerraformToolSystem {
         float effort = 1f;
         if (mode == Mode.RAISE || mode == Mode.LOWER) effort += clamp(slope / 70f, 0f, 0.28f);
         if (mode == Mode.LEVEL || mode == Mode.SMOOTH) effort += clamp(roughness / 4f, 0f, 0.22f);
-        float staminaCost = mode.staminaCost() * (0.72f + 0.28f * areaScale) * effort;
+        float quotedStaminaCost = mode.staminaCost() * (0.72f + 0.28f * areaScale) * effort;
 
-        if (stoneAvailable < stoneCost) {
-            return Result.denied("Raise ground needs " + stoneCost + " stone for this brush size.");
+        if (stoneAvailable < quotedStoneCost) {
+            return Result.denied("Raise ground needs " + quotedStoneCost + " stone for this brush size.");
         }
-        if (staminaAvailable + 0.0001f < staminaCost) {
+        if (staminaAvailable + 0.0001f < quotedStaminaCost) {
             return Result.denied("Too exhausted to shape the ground.");
         }
 
@@ -81,6 +81,10 @@ public final class TerraformToolSystem {
         };
 
         if (changed == 0) return new Result(false, 0, 0, 0f, "The ground cannot move further here.");
+        int expectedSamples = Math.max(1, Math.round((float) (Math.PI * radius * radius) / (terrain.cellSize() * terrain.cellSize())));
+        float productive = clamp(changed / (float) expectedSamples, 0.2f, 1f);
+        int stoneCost = quotedStoneCost == 0 ? 0 : Math.max(1, Math.round(quotedStoneCost * productive));
+        float staminaCost = quotedStaminaCost * (0.55f + 0.45f * productive);
         String detail = switch (mode) {
             case LEVEL -> " leveled around your footing.";
             case RAISE -> " packed into a stable mound.";
