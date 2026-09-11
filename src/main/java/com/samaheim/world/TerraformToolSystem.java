@@ -31,10 +31,9 @@ public final class TerraformToolSystem {
 
         float radius = clamp(requestedRadius, MIN_RADIUS, MAX_RADIUS);
         float borderMargin = radius * EDGE_BRUSH_MARGIN;
-        if (half - Math.abs(worldX) < borderMargin || half - Math.abs(worldZ) < borderMargin) {
-            return Result.denied("The terrain tool cannot shape the world edge.");
-        }
+        if (half - Math.abs(worldX) < borderMargin || half - Math.abs(worldZ) < borderMargin) return Result.denied("The terrain tool cannot shape the world edge.");
         float areaScale = clamp((radius * radius) / (DEFAULT_RADIUS * DEFAULT_RADIUS), 0.5f, 2.25f);
+        float depthScale = clamp((float) Math.sqrt(DEFAULT_RADIUS / radius), 0.82f, 1.18f);
         int quotedStoneCost = mode == Mode.RAISE ? Math.max(1, Math.round(mode.stoneCost() * areaScale)) : 0;
         float slope = terrain.slopeDegrees(worldX, worldZ, Math.max(0.7f, radius * 0.35f));
         float roughness = terrain.heightVariation(worldX, worldZ, Math.max(0.8f, radius * 0.45f));
@@ -52,11 +51,11 @@ public final class TerraformToolSystem {
         if (staminaAvailable + 0.0001f < quotedStaminaCost) return Result.denied("Too exhausted to shape the ground.");
 
         int changed = switch (mode) {
-            case LEVEL -> terrain.level(worldX, worldZ, radius, standingHeight, clamp(0.52f + roughness * 0.08f, 0.52f, 0.78f));
-            case RAISE -> terrain.raise(worldX, worldZ, radius, clamp(0.58f - slope * 0.0025f, 0.42f, 0.60f));
-            case LOWER -> terrain.lower(worldX, worldZ, radius, clamp(0.60f - slope * 0.002f, 0.44f, 0.62f));
-            case SMOOTH -> terrain.smooth(worldX, worldZ, radius, clamp(0.28f + roughness * 0.05f, 0.28f, 0.48f));
-            case RESTORE -> terrain.restore(worldX, worldZ, radius, 0.72f);
+            case LEVEL -> terrain.level(worldX, worldZ, radius, standingHeight, clamp((0.52f + roughness * 0.08f) * depthScale, 0.45f, 0.82f));
+            case RAISE -> terrain.raise(worldX, worldZ, radius, clamp((0.58f - slope * 0.0025f) * depthScale, 0.38f, 0.66f));
+            case LOWER -> terrain.lower(worldX, worldZ, radius, clamp((0.60f - slope * 0.002f) * depthScale, 0.40f, 0.69f));
+            case SMOOTH -> terrain.smooth(worldX, worldZ, radius, clamp((0.28f + roughness * 0.05f) * depthScale, 0.24f, 0.52f));
+            case RESTORE -> terrain.restore(worldX, worldZ, radius, 0.72f * depthScale);
         };
         if (changed == 0) return new Result(false, 0, 0, 0f, "The ground cannot move further here.");
         int expectedSamples = Math.max(1, Math.round((float) (Math.PI * radius * radius) / (terrain.cellSize() * terrain.cellSize())));
