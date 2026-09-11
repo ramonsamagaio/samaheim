@@ -6,6 +6,8 @@ public final class TerraformToolSystem {
     public static final float MIN_RADIUS = 1.6f;
     public static final float MAX_RADIUS = 4.2f;
     private static final float SMOOTH_NOOP_ROUGHNESS = 0.035f;
+    private static final float LEVEL_NOOP_ROUGHNESS = 0.055f;
+    private static final float LEVEL_NOOP_HEIGHT_ERROR = 0.045f;
 
     private TerraformToolSystem() { }
 
@@ -51,9 +53,14 @@ public final class TerraformToolSystem {
         int quotedStoneCost = mode == Mode.RAISE ? Math.max(1, Math.round(mode.stoneCost() * areaScale)) : 0;
         float slope = terrain.slopeDegrees(worldX, worldZ, Math.max(0.7f, radius * 0.35f));
         float roughness = terrain.heightVariation(worldX, worldZ, Math.max(0.8f, radius * 0.45f));
+        float centerHeight = terrain.sampleHeight(worldX, worldZ);
 
         if (mode == Mode.SMOOTH && roughness <= SMOOTH_NOOP_ROUGHNESS) {
             return Result.denied("The ground is already smooth here.");
+        }
+        if (mode == Mode.LEVEL && roughness <= LEVEL_NOOP_ROUGHNESS
+                && Math.abs(centerHeight - standingHeight) <= LEVEL_NOOP_HEIGHT_ERROR) {
+            return Result.denied("The ground is already level with your footing.");
         }
 
         float effort = 1f;
