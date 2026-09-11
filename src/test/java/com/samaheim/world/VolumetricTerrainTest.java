@@ -56,6 +56,25 @@ final class VolumetricTerrainTest {
     }
 
     @Test
+    void loadedDeepCaveExpandsInitialVisualChunkRange() {
+        VolumetricTerrain edited = terrain();
+        float surface = edited.surfaceHeight(0f, 0f);
+        float caveY = surface - 10f;
+        float radius = 3f;
+        edited.dig(new Vector3f(0f, caveY, 0f), radius, 8f);
+
+        VolumetricTerrain restored = terrain();
+        restored.decodeEdits(edited.encodeEdits());
+        int centerChunkX = (int) Math.floor((restored.halfExtent() / restored.spacing()) / restored.chunkCells());
+        int centerChunkZ = centerChunkX;
+        int[] range = restored.initialChunkYRange(centerChunkX, centerChunkZ);
+        int caveChunk = Math.max(0, (int) Math.floor(((caveY - radius) - restored.minY()) / restored.spacing()) / restored.chunkCells());
+
+        assertTrue(range[0] <= caveChunk);
+        assertTrue(range[1] >= caveChunk);
+    }
+
+    @Test
     void raycastTargetsTheActualDensitySurface() {
         VolumetricTerrain terrain = terrain();
         float surface = terrain.surfaceHeight(0f, 0f);
