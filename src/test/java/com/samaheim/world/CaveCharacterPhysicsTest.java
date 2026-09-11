@@ -36,15 +36,15 @@ final class CaveCharacterPhysicsTest {
     }
 
     @Test
-    void narrowRadiusIsLessGrotesqueAroundCarvedEdges() {
+    void narrowRadiusFitsAHumanTunnelThatRejectsTheOldGrotesqueBody() {
         VolumetricTerrain terrain = new VolumetricTerrain(777L, 24f, -16f, 18f, 1f, 8);
         float surface = terrain.surfaceHeight(0f, 0f);
-        Vector3f center = new Vector3f(0f, surface - 1.8f, 0f);
-        terrain.dig(center, 2.25f, 6f);
-        float foot = terrain.findFloor(0f, 0f, center.y + 1.4f, 5f);
+        Vector3f center = new Vector3f(0f, surface - 2.0f, 0f);
+        terrain.dig(center, 2.8f, 8f);
+        float foot = terrain.findFloor(0f, 0f, center.y + 1.2f, 6f);
 
         assertTrue(Float.isFinite(foot));
-        assertTrue(terrain.capsuleClear(0f, foot + 0.04f, 0f, 0.31f, 1.70f));
-        assertFalse(terrain.capsuleClear(0f, foot + 0.04f, 0f, 1.05f, 2.8f));
+        assertTrue(terrain.capsuleClear(0f, foot + 0.06f, 0f, 0.31f, 1.78f));
+        assertFalse(terrain.capsuleClear(0f, foot + 0.06f, 0f, 1.05f, 3.2f));
     }
 }
