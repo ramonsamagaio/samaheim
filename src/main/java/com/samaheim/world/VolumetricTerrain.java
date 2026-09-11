@@ -308,6 +308,7 @@ public final class VolumetricTerrain {
     private int gridZ(float z) { return clamp(Math.round((z + halfExtent) / spacing), 0, nz - 1); }
     private int index(int x, int y, int z) { return (z * ny + y) * nx + x; }
     private static int clamp(int value, int min, int max) { return Math.max(min, Math.min(max, value)); }
+    private static float clamp(float value, float min, float max) { return Math.max(min, Math.min(max, value)); }
     private static float clamp01(float value) { return Math.max(0f, Math.min(1f, value)); }
     private static float lerp(float a, float b, float t) { return a + (b - a) * t; }
     private static float distance(float ax, float ay, float az, float bx, float by, float bz) { float dx = ax - bx, dy = ay - by, dz = az - bz; return (float) Math.sqrt(dx * dx + dy * dy + dz * dz); }
