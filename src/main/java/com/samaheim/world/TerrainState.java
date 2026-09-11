@@ -2,8 +2,18 @@ package com.samaheim.world;
 
 import java.util.Locale;
 
+/**
+ * Editable terrain represented as three layers:
+ * generated base -> coarse sculpt delta -> fine leveling offset.
+ *
+ * Coarse sculpting mirrors raise/pickaxe style edits and is capped against the
+ * original generated terrain. Fine leveling is deliberately much narrower and
+ * rides on top of the sculpted surface, matching the feel of using a hoe to
+ * flatten around the altitude where the player is standing.
+ */
 public final class TerrainState {
     private static final float EPSILON = 0.0005f;
+    private static final float MAX_LEVEL_OFFSET = 1.0f;
 
     private final float halfExtent;
     private final int cells;
@@ -11,7 +21,8 @@ public final class TerrainState {
     private final float cellSize;
     private final float maxDelta;
     private final float[] baseHeights;
-    private final float[] deltas;
+    private final float[] sculptDeltas;
+    private final float[] levelOffsets;
 
     public TerrainState(long seed, float halfExtent, int cells, float maxDelta) {
         if (halfExtent <= 0f || cells < 2 || maxDelta <= 0f) {
@@ -23,7 +34,8 @@ public final class TerrainState {
         this.cellSize = (halfExtent * 2f) / cells;
         this.maxDelta = maxDelta;
         this.baseHeights = new float[width * width];
-        this.deltas = new float[width * width];
+        this.sculptDeltas = new float[width * width];
+        this.levelOffsets = new float[width * width];
 
         for (int z = 0; z < width; z++) {
             float worldZ = -halfExtent + z * cellSize;
@@ -39,16 +51,22 @@ public final class TerrainState {
     public float cellSize() { return cellSize; }
     public float halfExtent() { return halfExtent; }
     public float maxDelta() { return maxDelta; }
+    public float maxLevelOffset() { return MAX_LEVEL_OFFSET; }
     public float vertexWorldX(int x) { return -halfExtent + x * cellSize; }
     public float vertexWorldZ(int z) { return -halfExtent + z * cellSize; }
 
     public float vertexHeight(int x, int z) {
         int i = index(clampIndex(x), clampIndex(z));
-        return baseHeights[i] + deltas[i];
+        return baseHeights[i] + sculptDeltas[i] + levelOffsets[i];
     }
 
     public float originalVertexHeight(int x, int z) {
         return baseHeights[index(clampIndex(x), clampIndex(z))];
+    }
+
+    public float sculptedVertexHeight(int x, int z) {
+        int i = index(clampIndex(x), clampIndex(z));
+        return baseHeights[i] + sculptDeltas[i];
     }
 
     public float sampleHeight(float worldX, float worldZ) {
@@ -66,13 +84,17 @@ public final class TerrainState {
     }
 
     public int raise(float worldX, float worldZ, float radius, float amount) {
-        return addBrush(worldX, worldZ, radius, Math.abs(amount));
+        return sculptBrush(worldX, worldZ, radius, Math.abs(amount));
     }
 
     public int lower(float worldX, float worldZ, float radius, float amount) {
-        return addBrush(worldX, worldZ, radius, -Math.abs(amount));
+        return sculptBrush(worldX, worldZ, radius, -Math.abs(amount));
     }
 
+    /**
+     * Fine leveling toward a reference altitude. Unlike coarse sculpting, the
+     * hoe layer can only move +/-1m away from the current sculpted surface.
+     */
     public int level(float worldX, float worldZ, float radius, float targetHeight, float maxStep) {
         if (radius <= 0f || maxStep <= 0f) return 0;
         int changed = 0;
@@ -84,18 +106,21 @@ public final class TerrainState {
                 float wx = vertexWorldX(x);
                 float distance = distance(wx, wz, worldX, worldZ);
                 if (distance > radius) continue;
+
                 float weight = brushWeight(distance, radius);
                 int i = index(x, z);
-                float current = baseHeights[i] + deltas[i];
-                float wanted = clamp(targetHeight, baseHeights[i] - maxDelta, baseHeights[i] + maxDelta);
-                float difference = wanted - current;
+                float sculpted = baseHeights[i] + sculptDeltas[i];
+                float wantedFinal = clamp(targetHeight, sculpted - MAX_LEVEL_OFFSET, sculpted + MAX_LEVEL_OFFSET);
+                float wantedOffset = wantedFinal - sculpted;
+                float difference = wantedOffset - levelOffsets[i];
                 float step = clamp(difference, -maxStep * weight, maxStep * weight);
-                if (Math.abs(step) > EPSILON && setDelta(i, deltas[i] + step)) changed++;
+                if (Math.abs(step) > EPSILON && setLevelOffset(i, levelOffsets[i] + step)) changed++;
             }
         }
         return changed;
     }
 
+    /** Restores both coarse and fine modifications toward the generated world. */
     public int restore(float worldX, float worldZ, float radius, float strength) {
         if (radius <= 0f || strength <= 0f) return 0;
         int changed = 0;
@@ -108,19 +133,26 @@ public final class TerrainState {
                 float distance = distance(wx, wz, worldX, worldZ);
                 if (distance > radius) continue;
                 int i = index(x, z);
-                float next = moveToward(deltas[i], 0f, strength * brushWeight(distance, radius));
-                if (Math.abs(next - deltas[i]) > EPSILON && setDelta(i, next)) changed++;
+                float amount = strength * brushWeight(distance, radius);
+                float nextSculpt = moveToward(sculptDeltas[i], 0f, amount);
+                float nextLevel = moveToward(levelOffsets[i], 0f, amount);
+                boolean sculptChanged = Math.abs(nextSculpt - sculptDeltas[i]) > EPSILON && setSculptDelta(i, nextSculpt);
+                boolean levelChanged = Math.abs(nextLevel - levelOffsets[i]) > EPSILON && setLevelOffset(i, nextLevel);
+                if (sculptChanged || levelChanged) changed++;
             }
         }
         return changed;
     }
 
+    /**
+     * Sparse save format. s:index:value stores coarse sculpting and l:index:value
+     * stores leveling. Legacy index:value entries are accepted as sculpt edits.
+     */
     public String encodeDeltas() {
         StringBuilder out = new StringBuilder();
-        for (int i = 0; i < deltas.length; i++) {
-            if (Math.abs(deltas[i]) <= EPSILON) continue;
-            if (out.length() > 0) out.append(';');
-            out.append(i).append(':').append(String.format(Locale.ROOT, "%.4f", deltas[i]));
+        for (int i = 0; i < sculptDeltas.length; i++) {
+            if (Math.abs(sculptDeltas[i]) > EPSILON) append(out, 's', i, sculptDeltas[i]);
+            if (Math.abs(levelOffsets[i]) > EPSILON) append(out, 'l', i, levelOffsets[i]);
         }
         return out.toString();
     }
@@ -128,21 +160,28 @@ public final class TerrainState {
     public void decodeDeltas(String encoded) {
         if (encoded == null || encoded.isBlank()) return;
         for (String entry : encoded.split(";")) {
-            String[] pair = entry.split(":", 2);
-            if (pair.length != 2) continue;
+            String[] parts = entry.split(":");
             try {
-                int i = Integer.parseInt(pair[0]);
-                float value = Float.parseFloat(pair[1]);
-                if (i >= 0 && i < deltas.length && Float.isFinite(value)) {
-                    deltas[i] = clamp(value, -maxDelta, maxDelta);
+                if (parts.length == 3) {
+                    int i = Integer.parseInt(parts[1]);
+                    float value = Float.parseFloat(parts[2]);
+                    if (i < 0 || i >= sculptDeltas.length || !Float.isFinite(value)) continue;
+                    if ("s".equals(parts[0])) sculptDeltas[i] = clamp(value, -maxDelta, maxDelta);
+                    else if ("l".equals(parts[0])) levelOffsets[i] = clamp(value, -MAX_LEVEL_OFFSET, MAX_LEVEL_OFFSET);
+                } else if (parts.length == 2) {
+                    int i = Integer.parseInt(parts[0]);
+                    float value = Float.parseFloat(parts[1]);
+                    if (i >= 0 && i < sculptDeltas.length && Float.isFinite(value)) {
+                        sculptDeltas[i] = clamp(value, -maxDelta, maxDelta);
+                    }
                 }
             } catch (NumberFormatException ignored) {
-                // Ignore one corrupt sample rather than rejecting the whole save.
+                // A corrupt sample should not invalidate the entire world save.
             }
         }
     }
 
-    private int addBrush(float worldX, float worldZ, float radius, float amount) {
+    private int sculptBrush(float worldX, float worldZ, float radius, float amount) {
         if (radius <= 0f || amount == 0f) return 0;
         int changed = 0;
         int minX = gridMin(worldX - radius), maxX = gridMax(worldX + radius);
@@ -154,17 +193,29 @@ public final class TerrainState {
                 float distance = distance(wx, wz, worldX, worldZ);
                 if (distance > radius) continue;
                 int i = index(x, z);
-                if (setDelta(i, deltas[i] + amount * brushWeight(distance, radius))) changed++;
+                if (setSculptDelta(i, sculptDeltas[i] + amount * brushWeight(distance, radius))) changed++;
             }
         }
         return changed;
     }
 
-    private boolean setDelta(int i, float next) {
+    private boolean setSculptDelta(int i, float next) {
         float clamped = clamp(next, -maxDelta, maxDelta);
-        if (Math.abs(clamped - deltas[i]) <= EPSILON) return false;
-        deltas[i] = clamped;
+        if (Math.abs(clamped - sculptDeltas[i]) <= EPSILON) return false;
+        sculptDeltas[i] = clamped;
         return true;
+    }
+
+    private boolean setLevelOffset(int i, float next) {
+        float clamped = clamp(next, -MAX_LEVEL_OFFSET, MAX_LEVEL_OFFSET);
+        if (Math.abs(clamped - levelOffsets[i]) <= EPSILON) return false;
+        levelOffsets[i] = clamped;
+        return true;
+    }
+
+    private static void append(StringBuilder out, char layer, int index, float value) {
+        if (out.length() > 0) out.append(';');
+        out.append(layer).append(':').append(index).append(':').append(String.format(Locale.ROOT, "%.4f", value));
     }
 
     private int gridMin(float world) { return clampIndex((int) Math.floor((world + halfExtent) / cellSize)); }
