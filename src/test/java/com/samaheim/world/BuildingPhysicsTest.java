@@ -60,8 +60,8 @@ final class BuildingPhysicsTest {
     @Test
     void rotatedRampUsesRotatedLocalAxis() {
         var ramp = new BuildingPhysics.Ramp(0f, 0f, 0f, (float) (Math.PI / 2.0));
-        float low = BuildingPhysics.rampHeightAt(-1.2f, 0f, ramp);
-        float high = BuildingPhysics.rampHeightAt(1.2f, 0f, ramp);
+        float low = BuildingPhysics.rampHeightAt(1.2f, 0f, ramp);
+        float high = BuildingPhysics.rampHeightAt(-1.2f, 0f, ramp);
         assertTrue(low < high);
     }
 
