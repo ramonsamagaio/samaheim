@@ -5,8 +5,9 @@ import java.util.List;
 /** Small deterministic runtime physics layer for the current playable client. */
 public final class SandboxPhysics {
     private static final float EPS = 0.0001f;
-    private static final float MAX_HORIZONTAL_STEP = 0.35f;
-    private static final int MAX_DEPENETRATION_PASSES = 4;
+    private static final float COLLISION_SKIN = 0.012f;
+    private static final float MAX_HORIZONTAL_STEP = 0.28f;
+    private static final int MAX_DEPENETRATION_PASSES = 6;
 
     private SandboxPhysics() {}
 
@@ -21,6 +22,7 @@ public final class SandboxPhysics {
             return new HorizontalResult(fromX, fromZ, true);
         }
         List<CircleBlocker> safeBlockers = blockers == null ? List.of() : blockers;
+        float safeRadius = Float.isFinite(playerRadius) ? Math.max(0f, playerRadius) : 0f;
         float dxTotal = toX - fromX;
         float dzTotal = toZ - fromZ;
         float distance = (float) Math.sqrt(dxTotal * dxTotal + dzTotal * dzTotal);
@@ -34,10 +36,24 @@ public final class SandboxPhysics {
         for (int step = 0; step < steps; step++) {
             float candidateX = x + stepX;
             float candidateZ = z + stepZ;
-            Depenetration dep = depenetrate(candidateX, candidateZ, x, z, Math.max(0f, playerRadius), safeBlockers);
+            Depenetration dep = depenetrate(candidateX, candidateZ, x, z, safeRadius, safeBlockers);
+            if (dep.blocked) {
+                blocked = true;
+                // Preserve tangential motion when radial depenetration would otherwise make corners feel sticky.
+                float altX = x + stepX;
+                float altZ = z;
+                Depenetration xOnly = depenetrate(altX, altZ, x, z, safeRadius, safeBlockers);
+                float zCandidateX = x;
+                float zCandidateZ = z + stepZ;
+                Depenetration zOnly = depenetrate(zCandidateX, zCandidateZ, x, z, safeRadius, safeBlockers);
+                float fullProgress = progressSq(x, z, dep.x, dep.z);
+                float xProgress = progressSq(x, z, xOnly.x, xOnly.z);
+                float zProgress = progressSq(x, z, zOnly.x, zOnly.z);
+                if (xProgress > fullProgress && xProgress >= zProgress) dep = xOnly;
+                else if (zProgress > fullProgress) dep = zOnly;
+            }
             x = dep.x;
             z = dep.z;
-            blocked |= dep.blocked;
         }
         return new HorizontalResult(x, z, blocked);
     }
@@ -51,7 +67,7 @@ public final class SandboxPhysics {
             boolean changed = false;
             for (CircleBlocker blocker : blockers) {
                 if (blocker == null || !Float.isFinite(blocker.x()) || !Float.isFinite(blocker.z()) || !Float.isFinite(blocker.radius())) continue;
-                float minDistance = playerRadius + Math.max(0f, blocker.radius());
+                float minDistance = playerRadius + Math.max(0f, blocker.radius()) + COLLISION_SKIN;
                 if (minDistance <= EPS) continue;
                 float dx = x - blocker.x();
                 float dz = z - blocker.z();
@@ -66,7 +82,7 @@ public final class SandboxPhysics {
                     distance = (float) Math.sqrt(dx * dx + dz * dz);
                     if (distance <= EPS) { dx = 1f; dz = 0f; distance = 1f; }
                 }
-                float push = (minDistance + 0.001f) / distance;
+                float push = minDistance / distance;
                 x = blocker.x() + dx * push;
                 z = blocker.z() + dz * push;
             }
@@ -106,6 +122,11 @@ public final class SandboxPhysics {
             grounded = true;
         }
         return new VerticalResult(nextY, nextVelocity, grounded);
+    }
+
+    private static float progressSq(float x, float z, float nx, float nz) {
+        float dx = nx - x, dz = nz - z;
+        return dx * dx + dz * dz;
     }
 
     private record Depenetration(float x, float z, boolean blocked) {}
