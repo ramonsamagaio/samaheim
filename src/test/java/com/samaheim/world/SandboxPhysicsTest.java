@@ -29,6 +29,33 @@ final class SandboxPhysicsTest {
     }
 
     @Test
+    void fastMovementCannotTunnelThroughTreeSizedBlocker() {
+        var result = SandboxPhysics.resolveHorizontal(-4f, 0f, 4f, 0f, 0.42f,
+                List.of(new SandboxPhysics.CircleBlocker(0f, 0f, 0.55f)));
+        assertTrue(result.blocked());
+        assertTrue(result.x() < 0f, "swept movement must remain on the approach side");
+        assertTrue(Math.abs(result.x()) >= 0.96f);
+    }
+
+    @Test
+    void diagonalMovementSlidesAroundObstacleInsteadOfFreezing() {
+        var result = SandboxPhysics.resolveHorizontal(-1.4f, -1.0f, 1.2f, 1.8f, 0.42f,
+                List.of(new SandboxPhysics.CircleBlocker(0f, 0f, 0.6f)));
+        assertTrue(result.blocked());
+        assertTrue(result.z() > -0.4f, "collision should retain useful tangential movement");
+    }
+
+    @Test
+    void overlappingBlockersAreResolvedWithoutNaN() {
+        var result = SandboxPhysics.resolveHorizontal(0f, -2f, 0f, 0f, 0.42f,
+                List.of(new SandboxPhysics.CircleBlocker(-0.35f, 0f, 0.6f),
+                        new SandboxPhysics.CircleBlocker(0.35f, 0f, 0.6f)));
+        assertTrue(result.blocked());
+        assertTrue(Float.isFinite(result.x()));
+        assertTrue(Float.isFinite(result.z()));
+    }
+
+    @Test
     void jumpLeavesGroundAndGravityBringsPlayerBack() {
         float eyeHeight = 1.72f;
         float y = eyeHeight;
@@ -52,5 +79,18 @@ final class SandboxPhysicsTest {
     void fallingTracksRaisedTerrain() {
         var state = SandboxPhysics.stepVertical(5f, -2f, 2f, 1.72f, false, 0.05f);
         assertTrue(state.eyeY() >= 3.72f);
+    }
+
+    @Test
+    void hugeFrameHitchCannotTunnelBelowGround() {
+        var state = SandboxPhysics.stepVertical(20f, -50f, 4f, 1.72f, false, 0.8f);
+        assertTrue(state.eyeY() >= 5.72f);
+    }
+
+    @Test
+    void corruptedVerticalInputFailsSafeToGround() {
+        var state = SandboxPhysics.stepVertical(Float.NaN, Float.NaN, 3f, 1.72f, true, Float.NaN);
+        assertTrue(state.grounded());
+        assertEquals(4.72f, state.eyeY(), 0.001f);
     }
 }

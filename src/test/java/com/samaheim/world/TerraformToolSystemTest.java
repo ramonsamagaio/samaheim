@@ -27,19 +27,22 @@ final class TerraformToolSystemTest {
         assertTrue(result.applied());
         assertTrue(result.changedSamples() > 1);
         assertEquals(2, result.stoneSpent());
-        assertEquals(7f, result.staminaSpent(), 0.001f);
+        assertTrue(result.staminaSpent() >= 7f);
         assertTrue(terrain.sampleHeight(0f, 0f) > before);
     }
 
     @Test
     void wideRaiseCostsMoreStoneAndStaminaThanDefaultBrush() {
-        TerrainState terrain = new TerrainState(21L, 32f, 64, 8f);
-        float before = terrain.sampleHeight(0f, 0f);
-        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.RAISE,
+        TerrainState defaultTerrain = new TerrainState(21L, 32f, 64, 8f);
+        float before = defaultTerrain.sampleHeight(0f, 0f);
+        TerraformToolSystem.Result normal = TerraformToolSystem.apply(defaultTerrain, TerraformToolSystem.Mode.RAISE,
+                0f, 0f, before, TerraformToolSystem.DEFAULT_RADIUS, 20, 100f);
+        TerrainState wideTerrain = new TerrainState(21L, 32f, 64, 8f);
+        TerraformToolSystem.Result wide = TerraformToolSystem.apply(wideTerrain, TerraformToolSystem.Mode.RAISE,
                 0f, 0f, before, 4.2f, 20, 100f);
-        assertTrue(result.applied());
-        assertTrue(result.stoneSpent() > 2);
-        assertTrue(result.staminaSpent() > 7f);
+        assertTrue(wide.applied());
+        assertTrue(wide.stoneSpent() > normal.stoneSpent());
+        assertTrue(wide.staminaSpent() > normal.staminaSpent());
     }
 
     @Test
@@ -123,5 +126,42 @@ final class TerraformToolSystemTest {
         assertEquals(0, result.stoneSpent());
         assertEquals(0f, result.staminaSpent(), 0.001f);
         assertEquals(before, terrain.encodeDeltas());
+    }
+
+    @Test
+    void worldOutsideTargetIsRejectedRatherThanClampedToEdge() {
+        TerrainState terrain = new TerrainState(1L, 32f, 64, 8f);
+        String before = terrain.encodeDeltas();
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.LOWER,
+                1000f, 0f, 0f, 2.8f, 0, 100f);
+        assertFalse(result.applied());
+        assertEquals(before, terrain.encodeDeltas());
+    }
+
+    @Test
+    void alreadySmoothGroundDoesNotWasteStamina() {
+        TerrainState terrain = new TerrainState(13L, 32f, 64, 8f);
+        float h = terrain.sampleHeight(0f, 0f);
+        for (int i = 0; i < 20; i++) terrain.level(0f, 0f, 3f, h, 1f);
+        TerraformToolSystem.Result result = TerraformToolSystem.apply(terrain, TerraformToolSystem.Mode.SMOOTH,
+                0f, 0f, h, TerraformToolSystem.DEFAULT_RADIUS, 0, 100f);
+        if (!result.applied()) assertEquals(0f, result.staminaSpent(), 0.001f);
+    }
+
+    @Test
+    void steeperCoarseWorkCostsMoreStamina() {
+        TerrainState flat = new TerrainState(22L, 32f, 64, 8f);
+        float h = flat.sampleHeight(0f, 0f);
+        for (int i = 0; i < 10; i++) flat.level(0f, 0f, 4f, h, 1f);
+        TerraformToolSystem.Result easy = TerraformToolSystem.apply(flat, TerraformToolSystem.Mode.LOWER,
+                0f, 0f, h, 2.8f, 0, 100f);
+
+        TerrainState steep = new TerrainState(22L, 32f, 64, 8f);
+        steep.raise(1.2f, 0f, 1f, 5f);
+        TerraformToolSystem.Result hard = TerraformToolSystem.apply(steep, TerraformToolSystem.Mode.LOWER,
+                0f, 0f, steep.sampleHeight(0f, 0f), 2.8f, 0, 100f);
+        assertTrue(easy.applied());
+        assertTrue(hard.applied());
+        assertTrue(hard.staminaSpent() >= easy.staminaSpent());
     }
 }

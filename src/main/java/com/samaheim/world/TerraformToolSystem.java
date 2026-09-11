@@ -5,6 +5,7 @@ public final class TerraformToolSystem {
     public static final float DEFAULT_RADIUS = 2.8f;
     public static final float MIN_RADIUS = 1.6f;
     public static final float MAX_RADIUS = 4.2f;
+    private static final float SMOOTH_NOOP_ROUGHNESS = 0.035f;
 
     private TerraformToolSystem() { }
 
@@ -42,11 +43,23 @@ public final class TerraformToolSystem {
                 || !Float.isFinite(requestedRadius) || requestedRadius <= 0f) {
             return Result.denied("Invalid terrain target.");
         }
+        float half = terrain.halfExtent();
+        if (Math.abs(worldX) > half || Math.abs(worldZ) > half) return Result.denied("That ground is outside the world.");
 
         float radius = clamp(requestedRadius, MIN_RADIUS, MAX_RADIUS);
         float areaScale = clamp((radius * radius) / (DEFAULT_RADIUS * DEFAULT_RADIUS), 0.5f, 2.25f);
         int stoneCost = mode == Mode.RAISE ? Math.max(1, Math.round(mode.stoneCost() * areaScale)) : 0;
-        float staminaCost = mode.staminaCost() * (0.72f + 0.28f * areaScale);
+        float slope = terrain.slopeDegrees(worldX, worldZ, Math.max(0.7f, radius * 0.35f));
+        float roughness = terrain.heightVariation(worldX, worldZ, Math.max(0.8f, radius * 0.45f));
+
+        if (mode == Mode.SMOOTH && roughness <= SMOOTH_NOOP_ROUGHNESS) {
+            return Result.denied("The ground is already smooth here.");
+        }
+
+        float effort = 1f;
+        if (mode == Mode.RAISE || mode == Mode.LOWER) effort += clamp(slope / 70f, 0f, 0.28f);
+        if (mode == Mode.LEVEL || mode == Mode.SMOOTH) effort += clamp(roughness / 4f, 0f, 0.22f);
+        float staminaCost = mode.staminaCost() * (0.72f + 0.28f * areaScale) * effort;
 
         if (stoneAvailable < stoneCost) {
             return Result.denied("Raise ground needs " + stoneCost + " stone for this brush size.");
@@ -55,8 +68,6 @@ public final class TerraformToolSystem {
             return Result.denied("Too exhausted to shape the ground.");
         }
 
-        float slope = terrain.slopeDegrees(worldX, worldZ, Math.max(0.7f, radius * 0.35f));
-        float roughness = terrain.heightVariation(worldX, worldZ, Math.max(0.8f, radius * 0.45f));
         int changed = switch (mode) {
             case LEVEL -> terrain.level(worldX, worldZ, radius, standingHeight,
                     clamp(0.52f + roughness * 0.08f, 0.52f, 0.78f));
