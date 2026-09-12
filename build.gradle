@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.samaheim'
-version = '0.6.0-SNAPSHOT'
+version = '0.7.0-SNAPSHOT'
 
 repositories {
     mavenCentral()
@@ -29,6 +29,16 @@ java {
 
 application {
     mainClass = 'com.samaheim.SamaheimCaveGame'
+    applicationName = 'Samaheim'
+}
+
+tasks.named('jar') {
+    manifest {
+        attributes(
+                'Main-Class': application.mainClass.get(),
+                'Class-Path': configurations.runtimeClasspath.collect { it.name }.join(' ')
+        )
+    }
 }
 
 tasks.named('test') {
