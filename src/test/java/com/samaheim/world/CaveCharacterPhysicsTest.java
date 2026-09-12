@@ -15,7 +15,7 @@ final class CaveCharacterPhysicsTest {
         for (float x = -3f; x <= 5f; x += 2f) terrain.dig(new Vector3f(x, tunnelY, 0f), 2.4f, 6f);
         float foot = terrain.findFloor(-2.5f, 0f, tunnelY + 1.2f, 5f);
         assertTrue(Float.isFinite(foot));
-        assertTrue(terrain.capsuleClear(-2.5f, foot + 0.04f, 0f, 0.31f, 1.78f));
+        assertTrue(CaveCharacterPhysics.capsuleClear(terrain, -2.5f, foot + 0.04f, 0f, 0.31f, 1.78f));
 
         CaveCharacterPhysics.HorizontalMove move = CaveCharacterPhysics.moveHorizontal(terrain, -2.5f, foot + 0.04f, 0f,
                 5.5f, 0f, 0.31f, 1.78f, 0.48f);
@@ -36,7 +36,7 @@ final class CaveCharacterPhysicsTest {
     }
 
     @Test
-    void narrowRadiusFitsAHumanTunnelThatRejectsTheOldGrotesqueBody() {
+    void roundedRuntimeCapsuleFitsAHumanTunnelThatRejectsTheOldGrotesqueBody() {
         VolumetricTerrain terrain = new VolumetricTerrain(777L, 24f, -16f, 18f, 1f, 8);
         float surface = terrain.surfaceHeight(0f, 0f);
         Vector3f center = new Vector3f(0f, surface - 2.0f, 0f);
@@ -44,8 +44,17 @@ final class CaveCharacterPhysicsTest {
         float foot = terrain.findFloor(0f, 0f, center.y + 1.2f, 6f);
 
         assertTrue(Float.isFinite(foot));
-        assertTrue(terrain.capsuleClear(0f, foot + 0.06f, 0f, 0.31f, 1.78f));
-        assertFalse(terrain.capsuleClear(0f, foot + 0.06f, 0f, 1.05f, 3.2f));
+        assertTrue(CaveCharacterPhysics.capsuleClear(terrain, 0f, foot + 0.06f, 0f, 0.31f, 1.78f));
+        assertFalse(CaveCharacterPhysics.capsuleClear(terrain, 0f, foot + 0.06f, 0f, 1.05f, 3.2f));
+    }
+
+    @Test
+    void roundedCapsuleRejectsImpossibleBodyDimensionsAndWorldBoundaryOverlap() {
+        VolumetricTerrain terrain = new VolumetricTerrain(2026L, 24f, -16f, 18f, 1f, 8);
+        float foot = terrain.surfaceHeight(0f, 0f) + 0.06f;
+
+        assertFalse(CaveCharacterPhysics.capsuleClear(terrain, 0f, foot, 0f, 1f, 1.5f));
+        assertFalse(CaveCharacterPhysics.capsuleClear(terrain, terrain.halfExtent() - 0.1f, foot, 0f, 0.31f, 1.78f));
     }
 
     @Test
@@ -89,6 +98,6 @@ final class CaveCharacterPhysicsTest {
 
         assertTrue(move.landed());
         assertTrue(move.footY() >= floor - 0.03f);
-        assertTrue(terrain.capsuleClear(1f, move.footY(), -1f, 0.31f, 1.78f));
+        assertTrue(CaveCharacterPhysics.capsuleClear(terrain, 1f, move.footY(), -1f, 0.31f, 1.78f));
     }
 }
