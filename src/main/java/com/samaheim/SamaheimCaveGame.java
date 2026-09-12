@@ -32,6 +32,7 @@ import com.samaheim.world.BuildingPhysics;
 import com.samaheim.world.CaveCharacterPhysics;
 import com.samaheim.world.MarchingTetraMesher;
 import com.samaheim.world.SandboxPhysics;
+import com.samaheim.world.TerrainStreaming;
 import com.samaheim.world.VolumetricTerrain;
 import com.samaheim.world.WaterPhysics;
 
@@ -56,7 +57,7 @@ import java.util.Set;
  * create overhangs and enter caves instead of merely changing a heightfield.
  */
 public final class SamaheimCaveGame extends SimpleApplication implements ActionListener {
-    private static final float WORLD_HALF = 96f;
+    private static final float WORLD_HALF = 192f;
     private static final float MIN_Y = -24f;
     private static final float MAX_Y = 28f;
     private static final float SEA_LEVEL = -2.35f;
@@ -68,6 +69,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private static final float JUMP_SPEED = 6.4f;
     private static final float DAY_SECONDS = 900f;
     private static final int CHUNK_CELLS = 16;
+    private static final int TERRAIN_STREAM_RADIUS = 5;
 
     private final Node terrainRoot = new Node("volumetric-terrain");
     private final Node resources = new Node("resources");
@@ -103,6 +105,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private float messageClock;
     private float buildYaw;
     private float brushRadius = 2.6f;
+    private int streamedChunkX = Integer.MIN_VALUE;
+    private int streamedChunkZ = Integer.MIN_VALUE;
     private int wood;
     private int stone;
     private int berries;
@@ -141,6 +145,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             terrain.decodeEdits(save.edits);
             restoreState(save);
         }
+        playerX = save == null ? 0f : Math.clamp(save.x, -WORLD_HALF + 2f, WORLD_HALF - 2f);
+        playerZ = save == null ? 0f : Math.clamp(save.z, -WORLD_HALF + 2f, WORLD_HALF - 2f);
 
         rootNode.attachChild(terrainRoot);
         rootNode.attachChild(resources);
@@ -157,13 +163,11 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         configureBrushPreview();
         hud = new SamaheimHud(assetManager, guiNode, cam.getWidth(), cam.getHeight());
 
-        playerX = save == null ? 0f : Math.clamp(save.x, -WORLD_HALF + 2f, WORLD_HALF - 2f);
-        playerZ = save == null ? 0f : Math.clamp(save.z, -WORLD_HALF + 2f, WORLD_HALF - 2f);
         float surface = terrain.surfaceHeight(playerX, playerZ);
         footY = save == null ? surface + 0.04f : Math.max(save.footY, surface + 0.04f);
         if (!terrain.capsuleClear(playerX, footY, playerZ, PLAYER_RADIUS, PLAYER_HEIGHT)) footY = surface + 0.08f;
         updateCameraPosition();
-        announce("Terrain tool equipped. Lowlands now hold water; Space rises and Ctrl dives while swimming.");
+        announce("Terrain tool equipped. The larger world streams terrain around you; Space rises and Ctrl dives in water.");
     }
 
     private void restoreState(SaveData save) {
@@ -189,7 +193,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         flyCam.setZoomSpeed(0f);
         flyCam.setRotationSpeed(2.15f);
         flyCam.setDragToRotate(false);
-        cam.setFrustumPerspective(72f, (float) cam.getWidth() / cam.getHeight(), 0.04f, 420f);
+        cam.setFrustumPerspective(72f, (float) cam.getWidth() / cam.getHeight(), 0.04f, 520f);
     }
 
     private void configureInput() {
@@ -242,7 +246,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     }
 
     private void configureWaterSurface() {
-        Geometry water = new Geometry("water-surface", new Box(WORLD_HALF - 0.6f, 0.025f, WORLD_HALF - 0.6f));
+        Geometry water = new Geometry("water-surface", new Box(WORLD_HALF + 320f, 0.025f, WORLD_HALF + 320f));
         Material material = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         material.setColor("Color", new ColorRGBA(0.055f, 0.28f, 0.39f, 0.63f));
         material.getAdditionalRenderState().setBlendMode(RenderState.BlendMode.Alpha);
@@ -254,12 +258,26 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     }
 
     private void buildInitialTerrain() {
-        for (int cz = 0; cz < terrain.chunkCountZ(); cz++) {
-            for (int cx = 0; cx < terrain.chunkCountX(); cx++) {
-                int[] range = terrain.initialChunkYRange(cx, cz);
-                for (int cy = range[0]; cy <= range[1]; cy++) rebuildChunk(new VolumetricTerrain.ChunkKey(cx, cy, cz));
-            }
+        refreshTerrainStreaming(true);
+    }
+
+    private void refreshTerrainStreaming(boolean force) {
+        int centerX = TerrainStreaming.chunkX(terrain, playerX);
+        int centerZ = TerrainStreaming.chunkZ(terrain, playerZ);
+        if (!force && centerX == streamedChunkX && centerZ == streamedChunkZ) return;
+
+        Set<VolumetricTerrain.ChunkKey> desired = TerrainStreaming.desiredChunks(
+                terrain, playerX, playerZ, TERRAIN_STREAM_RADIUS);
+        for (VolumetricTerrain.ChunkKey key : new HashSet<>(terrainChunks.keySet())) {
+            if (desired.contains(key)) continue;
+            Geometry geometry = terrainChunks.remove(key);
+            if (geometry != null) geometry.removeFromParent();
         }
+        for (VolumetricTerrain.ChunkKey key : desired) {
+            if (!terrainChunks.containsKey(key)) rebuildChunk(key);
+        }
+        streamedChunkX = centerX;
+        streamedChunkZ = centerZ;
     }
 
     private void rebuildChunk(VolumetricTerrain.ChunkKey key) {
@@ -291,10 +309,10 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
 
     private void spawnWorld() {
         Random random = new Random(seed ^ 0x51A9L);
-        for (int i = 0; i < 78; i++) spawnResource("tree-" + i, ResourceType.TREE, random, 16f);
-        for (int i = 0; i < 56; i++) spawnResource("rock-" + i, ResourceType.ROCK, random, 12f);
-        for (int i = 0; i < 30; i++) spawnResource("berry-" + i, ResourceType.BERRY, random, 10f);
-        for (int i = 0; i < 10; i++) spawnEnemy(randomSurfacePoint(random, 24f), i < 7 ? EnemyType.GOBLIN : EnemyType.SKELETON);
+        for (int i = 0; i < 312; i++) spawnResource("tree-" + i, ResourceType.TREE, random, 16f);
+        for (int i = 0; i < 224; i++) spawnResource("rock-" + i, ResourceType.ROCK, random, 12f);
+        for (int i = 0; i < 120; i++) spawnResource("berry-" + i, ResourceType.BERRY, random, 10f);
+        for (int i = 0; i < 14; i++) spawnEnemy(randomSurfacePoint(random, 24f), i < 9 ? EnemyType.GOBLIN : EnemyType.SKELETON);
     }
 
     private void spawnResource(String id, ResourceType type, Random random, float safeRadius) {
@@ -408,6 +426,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         spawnClock += frame;
         saveClock += frame;
         updatePlayer(frame);
+        refreshTerrainStreaming(false);
         updateEnemies(frame);
         updateSurvival(frame);
         updateDayNight(frame);
@@ -810,6 +829,9 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             Float height = spatial.getUserData("blockHeight");
             if (radius == null || height == null || radius <= 0f) continue;
             Vector3f p = spatial.getLocalTranslation();
+            float dx = p.x - playerX;
+            float dz = p.z - playerZ;
+            if (dx * dx + dz * dz > 144f) continue;
             out.add(new SandboxPhysics.HeightCircleBlocker(p.x, p.z, radius, p.y, p.y + height));
         }
         return out;
@@ -864,12 +886,14 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         if (builds.stream().noneMatch(record -> record.type == BuildType.FLOOR)) return "Gather wood and place a floor with Q";
         if (!bladeCrafted) return "Craft the Wanderer's Blade [1]";
         if (kills < 4) return "Defeat 4 creatures (" + kills + "/4)";
-        return "Sandbox open: excavate caves, cross water, build, explore and survive";
+        return "Sandbox open: explore the larger streamed frontier, cross water, excavate caves and build";
     }
 
     private void respawn() {
         health = 100f; stamina = 100f; hunger = 70f; breath = 100f; velocityY = 0f;
-        playerX = 0f; playerZ = 0f; footY = terrain.surfaceHeight(0f, 0f) + 0.06f;
+        playerX = 0f; playerZ = 0f;
+        refreshTerrainStreaming(true);
+        footY = terrain.surfaceHeight(0f, 0f) + 0.06f;
         updateCameraPosition();
         announce("You wake at the Waystone.");
     }
