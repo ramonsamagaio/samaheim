@@ -70,12 +70,13 @@ public final class CaveCharacterPhysics {
 
         float bottomCenter = footY + radius;
         float topCenter = footY + height - radius;
-        float startY = footY + 0.08f;
-        float endY = footY + height + 0.04f;
         int verticalSamples = Math.max(4, (int) Math.ceil(height / 0.45f));
 
         for (int i = 0; i <= verticalSamples; i++) {
-            float y = startY + (endY - startY) * i / verticalSamples;
+            // Keep sample planes aligned with the established 1 m density field.
+            // The rounded radius changes the body shape without inventing extra
+            // collision planes between voxels that previously formed valid tunnels.
+            float y = footY + 0.08f + height * i / verticalSamples;
             float ringRadius = radius;
             if (y < bottomCenter) {
                 float dy = bottomCenter - y;
