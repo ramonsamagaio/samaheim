@@ -33,6 +33,7 @@ import com.samaheim.game.EncounterRules;
 import com.samaheim.game.EquipmentRules;
 import com.samaheim.game.NightCampRules;
 import com.samaheim.game.ResourceRegrowthRules;
+import com.samaheim.game.SaveFileRecovery;
 import com.samaheim.ui.SamaheimHud;
 import com.samaheim.world.BuildingPhysics;
 import com.samaheim.world.CaveCharacterPhysics;
@@ -45,8 +46,6 @@ import com.samaheim.world.WaterPhysics;
 import com.samaheim.world.WorldMath;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -1484,42 +1483,52 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         }
 
         static SaveData load() {
-            if (!Files.isRegularFile(PATH)) return null;
-            Properties p = new Properties();
-            try (InputStream input = Files.newInputStream(PATH)) {
-                p.load(input);
-                Set<String> removed = new HashSet<>();
-                String removedText = p.getProperty("removed", "");
-                if (!removedText.isBlank()) for (String id : removedText.split(";")) if (!id.isBlank()) removed.add(id);
-                Set<String> lootedPois = new HashSet<>();
-                String lootedText = p.getProperty("lootedPois", "");
-                if (!lootedText.isBlank()) for (String id : lootedText.split(";")) if (!id.isBlank()) lootedPois.add(id);
-                List<BuildRecord> builds = new ArrayList<>();
-                String buildsText = p.getProperty("builds", "");
-                if (!buildsText.isBlank()) for (String item : buildsText.split(";")) if (!item.isBlank()) builds.add(BuildRecord.decode(item));
-                boolean oldBlade = Boolean.parseBoolean(p.getProperty("blade", "false"));
-                Set<EquipmentRules.Weapon> crafted = EnumSet.noneOf(EquipmentRules.Weapon.class);
-                String craftedText = p.getProperty("craftedWeapons", "");
-                if (!craftedText.isBlank()) for (String item : craftedText.split(",")) if (!item.isBlank()) crafted.add(EquipmentRules.Weapon.valueOf(item));
-                if (oldBlade) crafted.add(EquipmentRules.Weapon.WANDERERS_BLADE);
-                EquipmentRules.Weapon equipped = EquipmentRules.Weapon.valueOf(p.getProperty("equippedWeapon",
-                        oldBlade ? EquipmentRules.Weapon.WANDERERS_BLADE.name() : EquipmentRules.Weapon.FISTS.name()));
-                return new SaveData(Long.parseLong(p.getProperty("seed")), Float.parseFloat(p.getProperty("x", "0")),
-                        Float.parseFloat(p.getProperty("footY", "0")), Float.parseFloat(p.getProperty("z", "0")),
-                        Float.parseFloat(p.getProperty("health", "100")), Float.parseFloat(p.getProperty("stamina", "100")),
-                        Float.parseFloat(p.getProperty("hunger", "100")), Float.parseFloat(p.getProperty("dayClock", "0.18")),
-                        Long.parseLong(p.getProperty("dawnIndex", "0")),
-                        Integer.parseInt(p.getProperty("wood", "0")), Integer.parseInt(p.getProperty("stone", "0")),
-                        Integer.parseInt(p.getProperty("berries", "0")), Integer.parseInt(p.getProperty("ironOre", "0")),
-                        Integer.parseInt(p.getProperty("mistResin", "0")), Integer.parseInt(p.getProperty("cinderShard", "0")),
-                        Integer.parseInt(p.getProperty("kills", "0")), oldBlade, equipped, crafted,
-                        ToolMode.valueOf(p.getProperty("toolMode", ToolMode.DIG.name())), BuildType.valueOf(p.getProperty("buildType", BuildType.FLOOR.name())),
-                        Float.parseFloat(p.getProperty("buildYaw", "0")), Float.parseFloat(p.getProperty("brushRadius", "2.6")),
-                        p.getProperty("edits", ""), removed, lootedPois, builds);
-            } catch (RuntimeException | IOException ex) {
-                System.err.println("Ignoring invalid cave save: " + ex.getMessage());
-                return null;
+            Path backup = SaveFileRecovery.backupPath(PATH);
+            for (Path candidate : SaveFileRecovery.candidates(PATH)) {
+                if (!Files.isRegularFile(candidate)) continue;
+                try {
+                    SaveData loaded = parse(SaveFileRecovery.loadProperties(candidate));
+                    if (candidate.equals(backup)) {
+                        SaveFileRecovery.restoreBackup(PATH);
+                        System.err.println("Recovered cave save from backup after primary failure.");
+                    }
+                    return loaded;
+                } catch (RuntimeException | IOException ex) {
+                    System.err.println("Invalid cave save " + candidate.getFileName() + ": " + ex.getMessage());
+                }
             }
+            return null;
+        }
+
+        private static SaveData parse(Properties p) {
+            Set<String> removed = new HashSet<>();
+            String removedText = p.getProperty("removed", "");
+            if (!removedText.isBlank()) for (String id : removedText.split(";")) if (!id.isBlank()) removed.add(id);
+            Set<String> lootedPois = new HashSet<>();
+            String lootedText = p.getProperty("lootedPois", "");
+            if (!lootedText.isBlank()) for (String id : lootedText.split(";")) if (!id.isBlank()) lootedPois.add(id);
+            List<BuildRecord> builds = new ArrayList<>();
+            String buildsText = p.getProperty("builds", "");
+            if (!buildsText.isBlank()) for (String item : buildsText.split(";")) if (!item.isBlank()) builds.add(BuildRecord.decode(item));
+            boolean oldBlade = Boolean.parseBoolean(p.getProperty("blade", "false"));
+            Set<EquipmentRules.Weapon> crafted = EnumSet.noneOf(EquipmentRules.Weapon.class);
+            String craftedText = p.getProperty("craftedWeapons", "");
+            if (!craftedText.isBlank()) for (String item : craftedText.split(",")) if (!item.isBlank()) crafted.add(EquipmentRules.Weapon.valueOf(item));
+            if (oldBlade) crafted.add(EquipmentRules.Weapon.WANDERERS_BLADE);
+            EquipmentRules.Weapon equipped = EquipmentRules.Weapon.valueOf(p.getProperty("equippedWeapon",
+                    oldBlade ? EquipmentRules.Weapon.WANDERERS_BLADE.name() : EquipmentRules.Weapon.FISTS.name()));
+            return new SaveData(Long.parseLong(p.getProperty("seed")), Float.parseFloat(p.getProperty("x", "0")),
+                    Float.parseFloat(p.getProperty("footY", "0")), Float.parseFloat(p.getProperty("z", "0")),
+                    Float.parseFloat(p.getProperty("health", "100")), Float.parseFloat(p.getProperty("stamina", "100")),
+                    Float.parseFloat(p.getProperty("hunger", "100")), Float.parseFloat(p.getProperty("dayClock", "0.18")),
+                    Long.parseLong(p.getProperty("dawnIndex", "0")),
+                    Integer.parseInt(p.getProperty("wood", "0")), Integer.parseInt(p.getProperty("stone", "0")),
+                    Integer.parseInt(p.getProperty("berries", "0")), Integer.parseInt(p.getProperty("ironOre", "0")),
+                    Integer.parseInt(p.getProperty("mistResin", "0")), Integer.parseInt(p.getProperty("cinderShard", "0")),
+                    Integer.parseInt(p.getProperty("kills", "0")), oldBlade, equipped, crafted,
+                    ToolMode.valueOf(p.getProperty("toolMode", ToolMode.DIG.name())), BuildType.valueOf(p.getProperty("buildType", BuildType.FLOOR.name())),
+                    Float.parseFloat(p.getProperty("buildYaw", "0")), Float.parseFloat(p.getProperty("brushRadius", "2.6")),
+                    p.getProperty("edits", ""), removed, lootedPois, builds);
         }
 
         void save() throws IOException {
@@ -1541,7 +1550,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             StringBuilder buildText = new StringBuilder();
             for (BuildRecord record : builds) { if (buildText.length() > 0) buildText.append(';'); buildText.append(record.encode()); }
             p.setProperty("builds", buildText.toString());
-            try (OutputStream output = Files.newOutputStream(PATH)) { p.store(output, "Samaheim volumetric cave save"); }
+            SaveFileRecovery.storeAtomic(p, PATH, "Samaheim volumetric cave save");
         }
     }
 }
