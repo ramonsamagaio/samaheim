@@ -33,6 +33,7 @@ import com.samaheim.world.CaveCharacterPhysics;
 import com.samaheim.world.MarchingTetraMesher;
 import com.samaheim.world.SandboxPhysics;
 import com.samaheim.world.VolumetricTerrain;
+import com.samaheim.world.WaterPhysics;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -58,6 +59,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private static final float WORLD_HALF = 96f;
     private static final float MIN_Y = -24f;
     private static final float MAX_Y = 28f;
+    private static final float SEA_LEVEL = -2.35f;
     private static final float PLAYER_RADIUS = 0.31f;
     private static final float PLAYER_HEIGHT = 1.78f;
     private static final float EYE_HEIGHT = 1.62f;
@@ -93,6 +95,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private float health = 100f;
     private float stamina = 100f;
     private float hunger = 100f;
+    private float breath = 100f;
     private float dayClock = 0.18f;
     private float attackCooldown;
     private float spawnClock;
@@ -110,6 +113,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private boolean right;
     private boolean sprint;
     private boolean jumpRequested;
+    private boolean jumpHeld;
+    private boolean swimDown;
     private boolean grounded = true;
     private boolean bladeCrafted;
     private ToolMode toolMode = ToolMode.DIG;
@@ -145,6 +150,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         configureInput();
         configureLighting();
         configureTerrainMaterial();
+        configureWaterSurface();
         buildInitialTerrain();
         spawnWorld();
         restoreBuilds();
@@ -157,7 +163,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         footY = save == null ? surface + 0.04f : Math.max(save.footY, surface + 0.04f);
         if (!terrain.capsuleClear(playerX, footY, playerZ, PLAYER_RADIUS, PLAYER_HEIGHT)) footY = surface + 0.08f;
         updateCameraPosition();
-        announce("Terrain tool equipped. Aim anywhere on earth and RMB to dig. T changes tool mode.");
+        announce("Terrain tool equipped. Lowlands now hold water; Space rises and Ctrl dives while swimming.");
     }
 
     private void restoreState(SaveData save) {
@@ -193,6 +199,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         inputManager.addMapping("Right", new KeyTrigger(KeyInput.KEY_D));
         inputManager.addMapping("Sprint", new KeyTrigger(KeyInput.KEY_LSHIFT));
         inputManager.addMapping("Jump", new KeyTrigger(KeyInput.KEY_SPACE));
+        inputManager.addMapping("SwimDown", new KeyTrigger(KeyInput.KEY_LCONTROL));
         inputManager.addMapping("Interact", new KeyTrigger(KeyInput.KEY_E));
         inputManager.addMapping("Attack", new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
         inputManager.addMapping("Terraform", new MouseButtonTrigger(MouseInput.BUTTON_RIGHT), new KeyTrigger(KeyInput.KEY_G));
@@ -206,7 +213,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         inputManager.addMapping("Dismantle", new KeyTrigger(KeyInput.KEY_X));
         inputManager.addMapping("Eat", new KeyTrigger(KeyInput.KEY_R));
         inputManager.addMapping("Save", new KeyTrigger(KeyInput.KEY_F5));
-        inputManager.addListener(this, "Forward", "Back", "Left", "Right", "Sprint", "Jump", "Interact", "Attack",
+        inputManager.addListener(this, "Forward", "Back", "Left", "Right", "Sprint", "Jump", "SwimDown", "Interact", "Attack",
                 "Terraform", "ToolMode", "BrushSmaller", "BrushLarger", "CraftBlade", "BuildMode", "RotateBuild",
                 "Build", "Dismantle", "Eat", "Save");
     }
@@ -232,6 +239,18 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         terrainMaterial.setColor("Ambient", new ColorRGBA(0.12f, 0.18f, 0.08f, 1f));
         terrainMaterial.setColor("Specular", new ColorRGBA(0.10f, 0.10f, 0.08f, 1f));
         terrainMaterial.setFloat("Shininess", 3f);
+    }
+
+    private void configureWaterSurface() {
+        Geometry water = new Geometry("water-surface", new Box(WORLD_HALF - 0.6f, 0.025f, WORLD_HALF - 0.6f));
+        Material material = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        material.setColor("Color", new ColorRGBA(0.055f, 0.28f, 0.39f, 0.63f));
+        material.getAdditionalRenderState().setBlendMode(RenderState.BlendMode.Alpha);
+        material.getAdditionalRenderState().setDepthWrite(false);
+        water.setMaterial(material);
+        water.setQueueBucket(RenderQueue.Bucket.Transparent);
+        water.setLocalTranslation(0f, SEA_LEVEL, 0f);
+        rootNode.attachChild(water);
     }
 
     private void buildInitialTerrain() {
@@ -312,13 +331,16 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     }
 
     private Vector3f randomSurfacePoint(Random random, float safeRadius) {
-        float x;
-        float z;
-        do {
-            x = random.nextFloat(-WORLD_HALF + 6f, WORLD_HALF - 6f);
-            z = random.nextFloat(-WORLD_HALF + 6f, WORLD_HALF - 6f);
-        } while (x * x + z * z < safeRadius * safeRadius);
-        return new Vector3f(x, terrain.surfaceHeight(x, z), z);
+        Vector3f fallback = null;
+        for (int attempt = 0; attempt < 240; attempt++) {
+            float x = random.nextFloat(-WORLD_HALF + 6f, WORLD_HALF - 6f);
+            float z = random.nextFloat(-WORLD_HALF + 6f, WORLD_HALF - 6f);
+            if (x * x + z * z < safeRadius * safeRadius) continue;
+            float y = terrain.surfaceHeight(x, z);
+            fallback = new Vector3f(x, y, z);
+            if (y >= SEA_LEVEL + 0.30f) return fallback;
+        }
+        return fallback == null ? new Vector3f(safeRadius + 2f, terrain.surfaceHeight(safeRadius + 2f, 0f), 0f) : fallback;
     }
 
     private void spawnEnemy(Vector3f p, EnemyType type) {
@@ -359,7 +381,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             case "Left" -> left = isPressed;
             case "Right" -> right = isPressed;
             case "Sprint" -> sprint = isPressed;
-            case "Jump" -> { if (isPressed) jumpRequested = true; }
+            case "Jump" -> { jumpHeld = isPressed; if (isPressed) jumpRequested = true; }
+            case "SwimDown" -> swimDown = isPressed;
             case "Interact" -> { if (isPressed) interact(); }
             case "Attack" -> { if (isPressed) attack(); }
             case "Terraform" -> { if (isPressed) terraform(); }
@@ -398,6 +421,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     }
 
     private void updatePlayer(float tpf) {
+        boolean swimming = WaterPhysics.isSwimming(footY, SEA_LEVEL);
+        boolean wading = WaterPhysics.isWading(footY, SEA_LEVEL);
         Vector3f forwardFlat = flatForward();
         Vector3f leftFlat = new Vector3f(forwardFlat.z, 0f, -forwardFlat.x);
         Vector3f wish = new Vector3f();
@@ -406,8 +431,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         if (left) wish.addLocal(leftFlat);
         if (right) wish.subtractLocal(leftFlat);
         boolean moving = wish.lengthSquared() > 0.001f;
-        boolean running = moving && sprint && stamina > 3f;
-        float speed = running ? 7.1f : 4.6f;
+        boolean pushing = moving && sprint && stamina > 3f;
+        float speed = WaterPhysics.horizontalSpeed(swimming, wading, pushing, stamina);
         if (moving) {
             wish.normalizeLocal().multLocal(speed * tpf);
             CaveCharacterPhysics.HorizontalMove volumeMove = CaveCharacterPhysics.moveHorizontal(terrain, playerX, footY, playerZ,
@@ -420,13 +445,19 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             footY = volumeMove.footY();
         }
 
-        grounded = CaveCharacterPhysics.grounded(terrain, playerX, footY, playerZ, PLAYER_RADIUS) || onBuildSupport();
-        if (jumpRequested && grounded) {
-            velocityY = JUMP_SPEED;
+        swimming = WaterPhysics.isSwimming(footY, SEA_LEVEL);
+        grounded = !swimming && (CaveCharacterPhysics.grounded(terrain, playerX, footY, playerZ, PLAYER_RADIUS) || onBuildSupport());
+        if (swimming) {
+            velocityY = WaterPhysics.nextSwimVelocity(footY, SEA_LEVEL, velocityY, jumpHeld, swimDown, tpf);
             grounded = false;
+        } else {
+            if (jumpRequested && grounded) {
+                velocityY = JUMP_SPEED;
+                grounded = false;
+            }
+            if (!grounded) velocityY -= GRAVITY * tpf; else if (velocityY < 0f) velocityY = 0f;
         }
         jumpRequested = false;
-        if (!grounded) velocityY -= GRAVITY * tpf; else if (velocityY < 0f) velocityY = 0f;
 
         float previousY = footY;
         CaveCharacterPhysics.VerticalMove vertical = CaveCharacterPhysics.moveVertical(terrain, playerX, footY, playerZ,
@@ -434,9 +465,9 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         footY = vertical.footY();
         if (vertical.landed()) { velocityY = 0f; grounded = true; }
         if (vertical.hitCeiling()) velocityY = Math.min(0f, velocityY);
-        landOnBuildSupport(previousY);
+        if (!swimming) landOnBuildSupport(previousY);
 
-        if (running) stamina = Math.max(0f, stamina - 20f * tpf); else stamina = Math.min(100f, stamina + 15f * tpf);
+        stamina = WaterPhysics.nextStamina(stamina, swimming, moving, pushing, tpf);
         updateCameraPosition();
     }
 
@@ -505,6 +536,9 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private void updateSurvival(float tpf) {
         hunger = Math.max(0f, hunger - 0.28f * tpf);
         if (hunger <= 0f) health = Math.max(0f, health - 1.0f * tpf);
+        boolean headUnderwater = footY + EYE_HEIGHT < SEA_LEVEL - 0.06f;
+        breath = WaterPhysics.nextBreath(breath, headUnderwater, tpf);
+        if (breath <= 0f) health = Math.max(0f, health - 8f * tpf);
     }
 
     private void updateDayNight(float tpf) {
@@ -806,14 +840,21 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         float x = Math.clamp(playerX + FastMath.cos(angle) * distance, -WORLD_HALF + 4f, WORLD_HALF - 4f);
         float z = Math.clamp(playerZ + FastMath.sin(angle) * distance, -WORLD_HALF + 4f, WORLD_HALF - 4f);
         float y = terrain.surfaceHeight(x, z);
+        if (y < SEA_LEVEL + 0.25f) return;
         spawnEnemy(new Vector3f(x, y, z), random.nextBoolean() ? EnemyType.GOBLIN : EnemyType.SKELETON);
     }
 
     private void updateHud() {
+        boolean swimming = WaterPhysics.isSwimming(footY, SEA_LEVEL);
+        boolean wading = WaterPhysics.isWading(footY, SEA_LEVEL);
         String objective = objectiveText();
         String resourcesText = "WOOD  " + wood + "    STONE  " + stone + "    BERRIES  " + berries + "    KILLS  " + kills;
+        if (breath < 99.5f) resourcesText += "    BREATH  " + Math.round(breath);
         String tool = "TERRAIN • " + toolMode.label.toUpperCase(Locale.ROOT) + " • " + String.format(Locale.ROOT, "%.1fm", brushRadius);
-        String detail = "RMB/G use   T mode   Z/C size     |     B build piece   Q place   F rotate   X remove";
+        String detail;
+        if (swimming) detail = "SWIMMING • Space rise   Ctrl dive   Shift push     |     stamina drains in deep water";
+        else if (wading) detail = "WADING • movement slowed     |     RMB/G terrain   B build   Q place   X remove";
+        else detail = "RMB/G use   T mode   Z/C size     |     B build piece   Q place   F rotate   X remove";
         hud.update(health, stamina, hunger, objective, resourcesText, tool, detail);
     }
 
@@ -823,11 +864,11 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         if (builds.stream().noneMatch(record -> record.type == BuildType.FLOOR)) return "Gather wood and place a floor with Q";
         if (!bladeCrafted) return "Craft the Wanderer's Blade [1]";
         if (kills < 4) return "Defeat 4 creatures (" + kills + "/4)";
-        return "Sandbox open: excavate caves, build, explore and survive";
+        return "Sandbox open: excavate caves, cross water, build, explore and survive";
     }
 
     private void respawn() {
-        health = 100f; stamina = 100f; hunger = 70f; velocityY = 0f;
+        health = 100f; stamina = 100f; hunger = 70f; breath = 100f; velocityY = 0f;
         playerX = 0f; playerZ = 0f; footY = terrain.surfaceHeight(0f, 0f) + 0.06f;
         updateCameraPosition();
         announce("You wake at the Waystone.");
