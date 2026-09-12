@@ -1,0 +1,37 @@
+name: Fix Dungeon Water State
+
+on:
+  push:
+    branches:
+      - work/first-runtime-dungeon
+    paths:
+      - tools/fix-dungeon-water.py
+      - .github/workflows/fix-dungeon-water.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/first-runtime-dungeon
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply dungeon water-state fix
+        run: python tools/fix-dungeon-water.py
+      - name: Commit fix
+        run: |
+          if git diff --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/com/samaheim/SamaheimCaveGame.java
+          git commit -m "Fix water state inside runtime dungeon"
+          git push origin HEAD:work/first-runtime-dungeon
