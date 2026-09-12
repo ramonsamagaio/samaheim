@@ -32,6 +32,7 @@ import com.samaheim.game.EquipmentRules;
 import com.samaheim.ui.SamaheimHud;
 import com.samaheim.world.BuildingPhysics;
 import com.samaheim.world.CaveCharacterPhysics;
+import com.samaheim.world.FrontierPoiPlanner;
 import com.samaheim.world.MarchingTetraMesher;
 import com.samaheim.world.SandboxPhysics;
 import com.samaheim.world.TerrainStreaming;
@@ -79,8 +80,10 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private final Node resources = new Node("resources");
     private final Node structures = new Node("structures");
     private final Node enemies = new Node("enemies");
+    private final Node pois = new Node("frontier-pois");
     private final Map<VolumetricTerrain.ChunkKey, Geometry> terrainChunks = new HashMap<>();
     private final Set<String> removedResources = new HashSet<>();
+    private final Set<String> lootedPois = new HashSet<>();
     private final List<BuildRecord> builds = new ArrayList<>();
 
     private VolumetricTerrain terrain;
@@ -161,6 +164,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         rootNode.attachChild(resources);
         rootNode.attachChild(structures);
         rootNode.attachChild(enemies);
+        rootNode.attachChild(pois);
         configureCamera();
         configureInput();
         configureLighting();
@@ -168,6 +172,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         configureWaterSurface();
         buildInitialTerrain();
         spawnWorld();
+        spawnFrontierPois();
         restoreBuilds();
         configureBrushPreview();
         hud = new SamaheimHud(assetManager, guiNode, cam.getWidth(), cam.getHeight());
@@ -201,6 +206,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         buildYaw = BuildingPhysics.snapYaw(save.buildYaw);
         brushRadius = Math.max(1.2f, Math.min(4.5f, save.brushRadius));
         removedResources.addAll(save.removed);
+        lootedPois.addAll(save.lootedPois);
         builds.addAll(save.builds);
     }
 
@@ -379,6 +385,66 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             if (y >= SEA_LEVEL + 0.30f) return fallback;
         }
         return fallback == null ? new Vector3f(safeRadius + 2f, terrain.surfaceHeight(safeRadius + 2f, 0f), 0f) : fallback;
+    }
+
+    private void spawnFrontierPois() {
+        for (FrontierPoiPlanner.Poi poi : FrontierPoiPlanner.plan(seed, WORLD_HALF)) {
+            float y = terrain.surfaceHeight(poi.x(), poi.z());
+            if (y < SEA_LEVEL + 0.2f) continue;
+            Node site = new Node("poi-" + poi.id());
+            site.setUserData("kind", "POI");
+            site.setUserData("poiId", poi.id());
+            site.setUserData("poiType", poi.type().name());
+            site.setLocalTranslation(poi.x(), y, poi.z());
+
+            ColorRGBA stoneColor = switch (poi.type()) {
+                case FORGE_RUIN -> new ColorRGBA(0.42f, 0.31f, 0.23f, 1f);
+                case FEN_ALTAR -> new ColorRGBA(0.17f, 0.39f, 0.30f, 1f);
+                case CINDER_SHRINE -> new ColorRGBA(0.46f, 0.18f, 0.10f, 1f);
+                case WAYSTONE_CACHE -> new ColorRGBA(0.29f, 0.31f, 0.39f, 1f);
+            };
+            Geometry plinth = new Geometry("poi-plinth", new Box(2.3f, 0.22f, 2.3f));
+            plinth.setMaterial(lit(stoneColor));
+            plinth.setLocalTranslation(0f, 0.22f, 0f);
+            site.attachChild(plinth);
+            for (int i = 0; i < 4; i++) {
+                float sx = (i & 1) == 0 ? -1.75f : 1.75f;
+                float sz = (i & 2) == 0 ? -1.75f : 1.75f;
+                Geometry pillar = new Geometry("poi-pillar", new Box(0.24f, 1.15f + (i % 2) * 0.35f, 0.24f));
+                pillar.setMaterial(lit(stoneColor.mult(0.82f)));
+                pillar.setLocalTranslation(sx, 1.15f, sz);
+                site.attachChild(pillar);
+            }
+            Geometry cache = new Geometry("poi-cache", new Box(0.56f, 0.38f, 0.42f));
+            ColorRGBA cacheColor = lootedPois.contains(poi.id())
+                    ? new ColorRGBA(0.18f, 0.16f, 0.14f, 1f)
+                    : new ColorRGBA(0.74f, 0.49f, 0.16f, 1f);
+            cache.setMaterial(lit(cacheColor));
+            cache.setLocalTranslation(0f, 0.62f, 0f);
+            site.attachChild(cache);
+            pois.attachChild(site);
+
+            if (!lootedPois.contains(poi.id())) {
+                EnemyType guardian = poi.type() == FrontierPoiPlanner.PoiType.CINDER_SHRINE ? EnemyType.SKELETON : EnemyType.GOBLIN;
+                spawnEnemy(new Vector3f(poi.x() + 3.2f, terrain.surfaceHeight(poi.x() + 3.2f, poi.z()), poi.z()), guardian);
+            }
+        }
+    }
+
+    private void lootPoi(Node site) {
+        String id = site.getUserData("poiId");
+        if (id == null) return;
+        if (lootedPois.contains(id)) { announce("This frontier cache is empty."); return; }
+        FrontierPoiPlanner.PoiType type = FrontierPoiPlanner.PoiType.valueOf(site.getUserData("poiType"));
+        FrontierPoiPlanner.Reward reward = FrontierPoiPlanner.reward(type);
+        wood += reward.wood(); stone += reward.stone(); berries += reward.berries();
+        ironOre += reward.ironOre(); mistResin += reward.mistResin(); cinderShard += reward.cinderShard();
+        lootedPois.add(id);
+        Spatial cacheSpatial = site.getChild("poi-cache");
+        if (cacheSpatial instanceof Geometry cache) {
+            cache.setMaterial(lit(new ColorRGBA(0.18f, 0.16f, 0.14f, 1f)));
+        }
+        announce("Looted " + type.name().toLowerCase(Locale.ROOT).replace('_', ' ') + ". Frontier materials recovered.");
     }
 
     private void spawnEnemy(Vector3f p, EnemyType type) {
@@ -742,6 +808,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             announce("Gathered " + kind.toLowerCase(Locale.ROOT) + bonus + ".");
             return;
         }
+        Node poi = raycastNode(pois, 5.4f);
+        if (poi != null) { lootPoi(poi); return; }
         Integer buildIndex = raycastBuild(4.8f);
         if (buildIndex != null && buildIndex >= 0 && buildIndex < builds.size() && builds.get(buildIndex).type == BuildType.DOOR) {
             BuildRecord record = builds.get(buildIndex);
@@ -1003,7 +1071,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         if (!craftedWeapons.contains(EquipmentRules.Weapon.WANDERERS_BLADE)) return "Craft the Wanderer's Blade [1]";
         if (kills < 4) return "Defeat 4 creatures (" + kills + "/4)";
         if (craftedWeapons.size() < 2) return "Explore a frontier region and craft an advanced weapon [2-4]";
-        return "Sandbox open: master frontier gear, caves, water, combat and building";
+        if (lootedPois.size() < 2) return "Find and loot 2 frontier sites (" + lootedPois.size() + "/2)";
+        return "Sandbox open: master frontier gear, caches, caves, water, combat and building";
     }
 
     private void respawn() {
@@ -1024,7 +1093,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         SaveData data = new SaveData(seed, playerX, footY, playerZ, health, stamina, hunger, dayClock, wood, stone, berries,
                 ironOre, mistResin, cinderShard, kills, bladeCrafted, equippedWeapon, EnumSet.copyOf(craftedWeapons),
                 toolMode, buildType, buildYaw, brushRadius, terrain.encodeEdits(),
-                new HashSet<>(removedResources), new ArrayList<>(builds));
+                new HashSet<>(removedResources), new HashSet<>(lootedPois), new ArrayList<>(builds));
         try { data.save(); } catch (IOException ex) { System.err.println("Save failed: " + ex.getMessage()); }
     }
 
@@ -1101,18 +1170,21 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         private final float brushRadius;
         private final String edits;
         private final Set<String> removed;
+        private final Set<String> lootedPois;
         private final List<BuildRecord> builds;
 
         SaveData(long seed, float x, float footY, float z, float health, float stamina, float hunger, float dayClock,
                  int wood, int stone, int berries, int ironOre, int mistResin, int cinderShard, int kills, boolean blade,
                  EquipmentRules.Weapon equippedWeapon, Set<EquipmentRules.Weapon> craftedWeapons,
-                 ToolMode toolMode, BuildType buildType, float buildYaw, float brushRadius, String edits, Set<String> removed, List<BuildRecord> builds) {
+                 ToolMode toolMode, BuildType buildType, float buildYaw, float brushRadius, String edits,
+                 Set<String> removed, Set<String> lootedPois, List<BuildRecord> builds) {
             this.seed = seed; this.x = x; this.footY = footY; this.z = z; this.health = health; this.stamina = stamina;
             this.hunger = hunger; this.dayClock = dayClock; this.wood = wood; this.stone = stone; this.berries = berries;
             this.ironOre = ironOre; this.mistResin = mistResin; this.cinderShard = cinderShard;
             this.kills = kills; this.blade = blade; this.equippedWeapon = equippedWeapon; this.craftedWeapons = craftedWeapons;
             this.toolMode = toolMode; this.buildType = buildType;
-            this.buildYaw = buildYaw; this.brushRadius = brushRadius; this.edits = edits; this.removed = removed; this.builds = builds;
+            this.buildYaw = buildYaw; this.brushRadius = brushRadius; this.edits = edits; this.removed = removed;
+            this.lootedPois = lootedPois; this.builds = builds;
         }
 
         static SaveData load() {
@@ -1123,6 +1195,9 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
                 Set<String> removed = new HashSet<>();
                 String removedText = p.getProperty("removed", "");
                 if (!removedText.isBlank()) for (String id : removedText.split(";")) if (!id.isBlank()) removed.add(id);
+                Set<String> lootedPois = new HashSet<>();
+                String lootedText = p.getProperty("lootedPois", "");
+                if (!lootedText.isBlank()) for (String id : lootedText.split(";")) if (!id.isBlank()) lootedPois.add(id);
                 List<BuildRecord> builds = new ArrayList<>();
                 String buildsText = p.getProperty("builds", "");
                 if (!buildsText.isBlank()) for (String item : buildsText.split(";")) if (!item.isBlank()) builds.add(BuildRecord.decode(item));
@@ -1143,7 +1218,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
                         Integer.parseInt(p.getProperty("kills", "0")), oldBlade, equipped, crafted,
                         ToolMode.valueOf(p.getProperty("toolMode", ToolMode.DIG.name())), BuildType.valueOf(p.getProperty("buildType", BuildType.FLOOR.name())),
                         Float.parseFloat(p.getProperty("buildYaw", "0")), Float.parseFloat(p.getProperty("brushRadius", "2.6")),
-                        p.getProperty("edits", ""), removed, builds);
+                        p.getProperty("edits", ""), removed, lootedPois, builds);
             } catch (RuntimeException | IOException ex) {
                 System.err.println("Ignoring invalid cave save: " + ex.getMessage());
                 return null;
@@ -1164,6 +1239,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             p.setProperty("craftedWeapons", craftedWeapons.stream().map(Enum::name).sorted().reduce((a, b) -> a + "," + b).orElse(""));
             p.setProperty("toolMode", toolMode.name()); p.setProperty("buildType", buildType.name()); p.setProperty("buildYaw", Float.toString(buildYaw));
             p.setProperty("brushRadius", Float.toString(brushRadius)); p.setProperty("edits", edits); p.setProperty("removed", String.join(";", removed));
+            p.setProperty("lootedPois", String.join(";", lootedPois));
             StringBuilder buildText = new StringBuilder();
             for (BuildRecord record : builds) { if (buildText.length() > 0) buildText.append(';'); buildText.append(record.encode()); }
             p.setProperty("builds", buildText.toString());
