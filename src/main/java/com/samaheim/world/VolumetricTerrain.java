@@ -53,15 +53,15 @@ public final class VolumetricTerrain {
             for (int x = 0; x < nx; x++) {
                 float wx = worldX(x);
                 float surface = WorldMath.height(seed, wx, wz);
-                boolean naturalCaves = FrontierCaveMath.columnMayContainCaves(wx, wz);
+                FrontierCaveMath.ColumnProfile caveProfile = FrontierCaveMath.columnProfile(seed, wx, wz);
                 for (int y = 0; y < ny; y++) {
                     float wy = worldY(y);
                     float baseDensity = surface - wy;
-                    if (!naturalCaves) {
+                    if (!caveProfile.enabled()) {
                         density[index(x, y, z)] = baseDensity;
                         continue;
                     }
-                    float caveDensity = FrontierCaveMath.caveDensity(seed, wx, wy, wz, surface);
+                    float caveDensity = FrontierCaveMath.caveDensity(caveProfile, surface - wy);
                     density[index(x, y, z)] = caveDensity < 7.99f ? Math.min(baseDensity, caveDensity) : baseDensity;
                 }
             }
