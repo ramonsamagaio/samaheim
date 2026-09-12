@@ -31,6 +31,7 @@ import com.samaheim.game.CombatRules;
 import com.samaheim.game.DungeonRules;
 import com.samaheim.game.EncounterRules;
 import com.samaheim.game.EquipmentRules;
+import com.samaheim.game.NightCampRules;
 import com.samaheim.ui.SamaheimHud;
 import com.samaheim.world.BuildingPhysics;
 import com.samaheim.world.CaveCharacterPhysics;
@@ -80,6 +81,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private static final String DUNGEON_GENERATED_FLAG = "__dungeon_generated__";
     private static final String DUNGEON_CLEARED_FLAG = "__dungeon_cleared__";
     private static final String DUNGEON_LOOTED_FLAG = "__dungeon_looted__";
+    private static final String RESTED_AT_CAMPFIRE_FLAG = "__rested_at_campfire__";
 
     private final Node terrainRoot = new Node("volumetric-terrain");
     private final Node resources = new Node("resources");
@@ -690,7 +692,11 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         updateBrushPreview();
         updateHud();
         lantern.setPosition(cam.getLocation().clone());
-        if (!inDungeon && spawnClock > 85f && enemies.getQuantity() < 16) { spawnClock = 0f; spawnRoamingEnemy(); }
+        boolean night = !inDungeon && NightCampRules.isNight(dayClock);
+        boolean warmed = !inDungeon && NightCampRules.warmedByCampfire(nearestCampfireDistance());
+        float spawnInterval = NightCampRules.roamingSpawnInterval(night, warmed);
+        int enemyCap = night && !warmed ? 20 : 16;
+        if (!inDungeon && spawnClock > spawnInterval && enemies.getQuantity() < enemyCap) { spawnClock = 0f; spawnRoamingEnemy(); }
         if (saveClock > 75f) { saveClock = 0f; saveGame(); }
         if (health <= 0f) respawn();
         if (messageClock <= 0f) hud.setMessage("");
@@ -744,6 +750,11 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         if (!swimming) landOnBuildSupport(previousY);
 
         stamina = WaterPhysics.nextStamina(stamina, swimming, moving, pushing, tpf);
+        if (!inDungeon && !swimming) {
+            boolean night = NightCampRules.isNight(dayClock);
+            boolean warmed = NightCampRules.warmedByCampfire(nearestCampfireDistance());
+            stamina = Math.min(100f, stamina + NightCampRules.staminaRecoveryBonus(night, warmed) * tpf);
+        }
         updateCameraPosition();
     }
 
@@ -860,7 +871,10 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     }
 
     private void updateSurvival(float tpf) {
-        hunger = Math.max(0f, hunger - 0.28f * tpf);
+        boolean night = !inDungeon && NightCampRules.isNight(dayClock);
+        boolean warmed = !inDungeon && NightCampRules.warmedByCampfire(nearestCampfireDistance());
+        float hungerMultiplier = NightCampRules.hungerDrainMultiplier(night, warmed);
+        hunger = Math.max(0f, hunger - 0.28f * hungerMultiplier * tpf);
         if (hunger <= 0f) health = Math.max(0f, health - 1.0f * tpf);
         boolean headUnderwater = !inDungeon && footY + EYE_HEIGHT < SEA_LEVEL - 0.06f;
         breath = WaterPhysics.nextBreath(breath, headUnderwater, tpf);
@@ -994,12 +1008,18 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             if ("DUNGEON_EXIT".equals(kind)) { leaveDungeon(); return; }
         }
         Integer buildIndex = raycastBuild(4.8f);
-        if (buildIndex != null && buildIndex >= 0 && buildIndex < builds.size() && builds.get(buildIndex).type == BuildType.DOOR) {
+        if (buildIndex != null && buildIndex >= 0 && buildIndex < builds.size()) {
             BuildRecord record = builds.get(buildIndex);
-            builds.set(buildIndex, record.withOpen(!record.open));
-            rebuildStructures();
-            announce(record.open ? "Door closed." : "Door opened.");
-            return;
+            if (record.type == BuildType.DOOR) {
+                builds.set(buildIndex, record.withOpen(!record.open));
+                rebuildStructures();
+                announce(record.open ? "Door closed." : "Door opened.");
+                return;
+            }
+            if (record.type == BuildType.CAMPFIRE) {
+                restAtCampfire(record);
+                return;
+            }
         }
         announce("Nothing usable in reach.");
     }
@@ -1228,6 +1248,52 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         announce("Berry eaten.");
     }
 
+    private float nearestCampfireDistance() {
+        float nearest = Float.POSITIVE_INFINITY;
+        for (BuildRecord record : builds) {
+            if (record.type != BuildType.CAMPFIRE) continue;
+            float dx = record.x - playerX;
+            float dz = record.z - playerZ;
+            nearest = Math.min(nearest, (float) Math.sqrt(dx * dx + dz * dz));
+        }
+        return nearest;
+    }
+
+    private boolean nearbyThreat() {
+        for (Spatial spatial : enemies.getChildren()) {
+            Vector3f p = spatial.getLocalTranslation();
+            float dx = p.x - playerX;
+            float dz = p.z - playerZ;
+            float dy = Math.abs(p.y - footY);
+            if (dx * dx + dz * dz <= 12f * 12f && dy < 4f) return true;
+        }
+        return false;
+    }
+
+    private void restAtCampfire(BuildRecord campfire) {
+        float dx = campfire.x - playerX;
+        float dz = campfire.z - playerZ;
+        float distance = (float) Math.sqrt(dx * dx + dz * dz);
+        boolean night = NightCampRules.isNight(dayClock);
+        boolean warmed = NightCampRules.warmedByCampfire(distance);
+        boolean threatened = nearbyThreat();
+        if (!NightCampRules.canRest(night, warmed, threatened)) {
+            if (!night) announce("Rest becomes available at night.");
+            else if (threatened) announce("Enemies are too close to rest.");
+            else announce("Move closer to the campfire to rest.");
+            return;
+        }
+        NightCampRules.RestResult result = NightCampRules.rest(health, stamina, hunger);
+        health = result.health();
+        stamina = result.stamina();
+        hunger = result.hunger();
+        dayClock = result.dayClock();
+        spawnClock = 0f;
+        removedResources.add(RESTED_AT_CAMPFIRE_FLAG);
+        saveGame();
+        announce("You rest by the fire. Morning breaks, wounds mend, and hunger still matters.");
+    }
+
     private void spawnRoamingEnemy() {
         Random random = new Random(seed ^ Float.floatToIntBits(dayClock) ^ kills * 131L);
         float angle = random.nextFloat() * FastMath.TWO_PI;
@@ -1248,7 +1314,11 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         if (breath < 99.5f) resourcesText += "    BREATH  " + Math.round(breath);
         String tool = equippedWeapon.label().toUpperCase(Locale.ROOT) + "  |  TERRAIN " + toolMode.label.toUpperCase(Locale.ROOT) + " " + String.format(Locale.ROOT, "%.1fm", brushRadius);
         String detail;
+        boolean night = !inDungeon && NightCampRules.isNight(dayClock);
+        boolean warmed = !inDungeon && NightCampRules.warmedByCampfire(nearestCampfireDistance());
         if (swimming) detail = "SWIMMING • Space rise   Ctrl dive   Shift push     |     stamina drains in deep water";
+        else if (night && warmed) detail = "NIGHT • CAMPFIRE WARMTH • safer spawns + stamina recovery • aim at fire + E to rest";
+        else if (night) detail = "NIGHT • EXPOSED • hostile roaming pressure increased • build a campfire for safety";
         else if (wading) detail = "WADING • movement slowed     |     RMB/G terrain   B build   Q place   X remove";
         else detail = "LMB light  MMB heavy   1-4 craft/equip weapons   |   RMB/G terrain   B build   Q place";
         hud.update(health, stamina, hunger, objective, resourcesText, tool, detail);
@@ -1263,7 +1333,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         if (craftedWeapons.size() < 2) return "Explore a frontier region and craft an advanced weapon [2-4]";
         if (lootedPois.size() < 2) return "Find and loot 2 frontier sites (" + lootedPois.size() + "/2)";
         if (!dungeonLooted()) return inDungeon ? "Clear the Delve guardians, claim the relic cache, then find the exit" : "Use a looted Waystone Cache again to enter the Delve";
-        return "Sandbox open: master frontier gear, caches, the Delve, caves, water, combat and building";
+        if (!removedResources.contains(RESTED_AT_CAMPFIRE_FLAG)) return "Build a campfire, survive until night, then aim at the fire and press E to rest";
+        return "Sandbox open: master frontier gear, caches, the Delve, night survival, caves, water, combat and building";
     }
 
     private void respawn() {
