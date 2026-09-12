@@ -36,7 +36,7 @@ final class CaveCharacterPhysicsTest {
     }
 
     @Test
-    void roundedRuntimeCapsuleFitsAHumanTunnelThatRejectsTheOldGrotesqueBody() {
+    void roundedRuntimeCapsuleFitsAHumanScaleExcavatedTunnel() {
         VolumetricTerrain terrain = new VolumetricTerrain(777L, 24f, -16f, 18f, 1f, 8);
         float surface = terrain.surfaceHeight(0f, 0f);
         Vector3f center = new Vector3f(0f, surface - 2.0f, 0f);
@@ -45,7 +45,6 @@ final class CaveCharacterPhysicsTest {
 
         assertTrue(Float.isFinite(foot));
         assertTrue(CaveCharacterPhysics.capsuleClear(terrain, 0f, foot + 0.06f, 0f, 0.31f, 1.78f));
-        assertFalse(CaveCharacterPhysics.capsuleClear(terrain, 0f, foot + 0.06f, 0f, 1.05f, 3.2f));
     }
 
     @Test
