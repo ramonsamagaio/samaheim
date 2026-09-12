@@ -651,8 +651,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     }
 
     private void updatePlayer(float tpf) {
-        boolean swimming = WaterPhysics.isSwimming(footY, SEA_LEVEL);
-        boolean wading = WaterPhysics.isWading(footY, SEA_LEVEL);
+        boolean swimming = !inDungeon && WaterPhysics.isSwimming(footY, SEA_LEVEL);
+        boolean wading = !inDungeon && WaterPhysics.isWading(footY, SEA_LEVEL);
         Vector3f forwardFlat = flatForward();
         Vector3f leftFlat = new Vector3f(forwardFlat.z, 0f, -forwardFlat.x);
         Vector3f wish = new Vector3f();
@@ -675,7 +675,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             footY = volumeMove.footY();
         }
 
-        swimming = WaterPhysics.isSwimming(footY, SEA_LEVEL);
+        swimming = !inDungeon && WaterPhysics.isSwimming(footY, SEA_LEVEL);
         grounded = !swimming && (CaveCharacterPhysics.grounded(terrain, playerX, footY, playerZ, PLAYER_RADIUS) || onBuildSupport());
         if (swimming) {
             velocityY = WaterPhysics.nextSwimVelocity(footY, SEA_LEVEL, velocityY, jumpHeld, swimDown, tpf);
@@ -810,7 +810,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private void updateSurvival(float tpf) {
         hunger = Math.max(0f, hunger - 0.28f * tpf);
         if (hunger <= 0f) health = Math.max(0f, health - 1.0f * tpf);
-        boolean headUnderwater = footY + EYE_HEIGHT < SEA_LEVEL - 0.06f;
+        boolean headUnderwater = !inDungeon && footY + EYE_HEIGHT < SEA_LEVEL - 0.06f;
         breath = WaterPhysics.nextBreath(breath, headUnderwater, tpf);
         if (breath <= 0f) health = Math.max(0f, health - 8f * tpf);
     }
@@ -953,7 +953,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     }
 
     private void attack(CombatRules.AttackKind kind) {
-        if (WaterPhysics.isSwimming(footY, SEA_LEVEL)) {
+        if (!inDungeon && WaterPhysics.isSwimming(footY, SEA_LEVEL)) {
             announce("You cannot swing effectively while swimming.");
             return;
         }
@@ -1188,8 +1188,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     }
 
     private void updateHud() {
-        boolean swimming = WaterPhysics.isSwimming(footY, SEA_LEVEL);
-        boolean wading = WaterPhysics.isWading(footY, SEA_LEVEL);
+        boolean swimming = !inDungeon && WaterPhysics.isSwimming(footY, SEA_LEVEL);
+        boolean wading = !inDungeon && WaterPhysics.isWading(footY, SEA_LEVEL);
         String objective = objectiveText();
         String resourcesText = "WOOD " + wood + "  STONE " + stone + "  IRON " + ironOre + "  RESIN " + mistResin + "  CINDER " + cinderShard + "  KILLS " + kills;
         if (breath < 99.5f) resourcesText += "    BREATH  " + Math.round(breath);
