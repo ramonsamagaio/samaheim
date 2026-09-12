@@ -28,6 +28,7 @@ import com.jme3.scene.shape.Sphere;
 import com.jme3.system.AppSettings;
 import com.jme3.util.BufferUtils;
 import com.samaheim.game.CombatRules;
+import com.samaheim.game.EquipmentRules;
 import com.samaheim.ui.SamaheimHud;
 import com.samaheim.world.BuildingPhysics;
 import com.samaheim.world.CaveCharacterPhysics;
@@ -36,6 +37,7 @@ import com.samaheim.world.SandboxPhysics;
 import com.samaheim.world.TerrainStreaming;
 import com.samaheim.world.VolumetricTerrain;
 import com.samaheim.world.WaterPhysics;
+import com.samaheim.world.WorldMath;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -45,6 +47,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -111,7 +114,12 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private int wood;
     private int stone;
     private int berries;
+    private int ironOre;
+    private int mistResin;
+    private int cinderShard;
     private int kills;
+    private final Set<EquipmentRules.Weapon> craftedWeapons = EnumSet.noneOf(EquipmentRules.Weapon.class);
+    private EquipmentRules.Weapon equippedWeapon = EquipmentRules.Weapon.FISTS;
     private boolean forward;
     private boolean back;
     private boolean left;
@@ -179,8 +187,15 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         wood = Math.max(0, save.wood);
         stone = Math.max(0, save.stone);
         berries = Math.max(0, save.berries);
+        ironOre = Math.max(0, save.ironOre);
+        mistResin = Math.max(0, save.mistResin);
+        cinderShard = Math.max(0, save.cinderShard);
         kills = Math.max(0, save.kills);
-        bladeCrafted = save.blade;
+        craftedWeapons.addAll(save.craftedWeapons);
+        if (save.blade) craftedWeapons.add(EquipmentRules.Weapon.WANDERERS_BLADE);
+        equippedWeapon = save.equippedWeapon;
+        if (equippedWeapon != EquipmentRules.Weapon.FISTS && !craftedWeapons.contains(equippedWeapon)) equippedWeapon = EquipmentRules.Weapon.FISTS;
+        bladeCrafted = craftedWeapons.contains(EquipmentRules.Weapon.WANDERERS_BLADE);
         toolMode = save.toolMode;
         buildType = save.buildType;
         buildYaw = BuildingPhysics.snapYaw(save.buildYaw);
@@ -213,6 +228,9 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         inputManager.addMapping("BrushSmaller", new KeyTrigger(KeyInput.KEY_Z));
         inputManager.addMapping("BrushLarger", new KeyTrigger(KeyInput.KEY_C));
         inputManager.addMapping("CraftBlade", new KeyTrigger(KeyInput.KEY_1));
+        inputManager.addMapping("Weapon2", new KeyTrigger(KeyInput.KEY_2));
+        inputManager.addMapping("Weapon3", new KeyTrigger(KeyInput.KEY_3));
+        inputManager.addMapping("Weapon4", new KeyTrigger(KeyInput.KEY_4));
         inputManager.addMapping("BuildMode", new KeyTrigger(KeyInput.KEY_B));
         inputManager.addMapping("RotateBuild", new KeyTrigger(KeyInput.KEY_F));
         inputManager.addMapping("Build", new KeyTrigger(KeyInput.KEY_Q));
@@ -220,7 +238,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         inputManager.addMapping("Eat", new KeyTrigger(KeyInput.KEY_R));
         inputManager.addMapping("Save", new KeyTrigger(KeyInput.KEY_F5));
         inputManager.addListener(this, "Forward", "Back", "Left", "Right", "Sprint", "Jump", "SwimDown", "Interact", "Attack", "HeavyAttack",
-                "Terraform", "ToolMode", "BrushSmaller", "BrushLarger", "CraftBlade", "BuildMode", "RotateBuild",
+                "Terraform", "ToolMode", "BrushSmaller", "BrushLarger", "CraftBlade", "Weapon2", "Weapon3", "Weapon4", "BuildMode", "RotateBuild",
                 "Build", "Dismantle", "Eat", "Save");
     }
 
@@ -412,7 +430,10 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             case "ToolMode" -> { if (isPressed) cycleToolMode(); }
             case "BrushSmaller" -> { if (isPressed) changeBrush(-0.35f); }
             case "BrushLarger" -> { if (isPressed) changeBrush(0.35f); }
-            case "CraftBlade" -> { if (isPressed) craftBlade(); }
+            case "CraftBlade" -> { if (isPressed) craftOrEquip(EquipmentRules.Weapon.WANDERERS_BLADE); }
+            case "Weapon2" -> { if (isPressed) craftOrEquip(EquipmentRules.Weapon.HIGHLAND_MAUL); }
+            case "Weapon3" -> { if (isPressed) craftOrEquip(EquipmentRules.Weapon.MIST_PIKE); }
+            case "Weapon4" -> { if (isPressed) craftOrEquip(EquipmentRules.Weapon.CINDER_BLADE); }
             case "BuildMode" -> { if (isPressed) { buildType = buildType.next(); announce("Build: " + buildType.label); } }
             case "RotateBuild" -> { if (isPressed) { buildYaw = BuildingPhysics.snapYaw(buildYaw + FastMath.HALF_PI); announce("Build rotation: " + Math.round(buildYaw * FastMath.RAD_TO_DEG) + " degrees"); } }
             case "Build" -> { if (isPressed) placeBuild(); }
@@ -709,9 +730,16 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             else if ("ROCK".equals(kind)) stone += 2;
             else if ("BERRY".equals(kind)) berries += 2;
             else return;
+            Vector3f resourcePosition = resource.getLocalTranslation();
+            EquipmentRules.GatherKind gatherKind = EquipmentRules.GatherKind.valueOf(kind);
+            EquipmentRules.MaterialYield yield = EquipmentRules.gatherYield(WorldMath.region(seed, resourcePosition.x, resourcePosition.z), gatherKind);
+            ironOre += yield.ironOre();
+            mistResin += yield.mistResin();
+            cinderShard += yield.cinderShard();
             removedResources.add(id);
             resource.removeFromParent();
-            announce("Gathered " + kind.toLowerCase(Locale.ROOT) + ".");
+            String bonus = yield.ironOre() > 0 ? " + iron ore" : yield.mistResin() > 0 ? " + mist resin" : "";
+            announce("Gathered " + kind.toLowerCase(Locale.ROOT) + bonus + ".");
             return;
         }
         Integer buildIndex = raycastBuild(4.8f);
@@ -730,7 +758,15 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             announce("You cannot swing effectively while swimming.");
             return;
         }
-        CombatRules.PlayerAttack attack = CombatRules.playerAttack(bladeCrafted, kind);
+        boolean armed = equippedWeapon != EquipmentRules.Weapon.FISTS;
+        CombatRules.PlayerAttack baseAttack = CombatRules.playerAttack(armed, kind);
+        EquipmentRules.AttackTuning tuning = EquipmentRules.tuning(equippedWeapon);
+        CombatRules.PlayerAttack attack = new CombatRules.PlayerAttack(
+                baseAttack.damage() * tuning.damageMultiplier(),
+                baseAttack.range() + tuning.rangeBonus(),
+                baseAttack.staminaCost() * tuning.staminaMultiplier(),
+                baseAttack.cooldownSeconds() * tuning.cooldownMultiplier(),
+                baseAttack.staggerSeconds() * tuning.staggerMultiplier());
         if (!CombatRules.canAttack(stamina, attackCooldown, attack)) {
             if (attackCooldown <= 0f) announce("Too exhausted to attack.");
             return;
@@ -742,9 +778,15 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
 
         float hp = enemy.<Float>getUserData("hp") - attack.damage();
         if (hp <= 0f) {
+            Vector3f defeatedAt = enemy.getLocalTranslation().clone();
+            EnemyType defeatedType = EnemyType.valueOf(enemy.getUserData("enemyType"));
+            EquipmentRules.MaterialYield drop = EquipmentRules.enemyDrop(WorldMath.region(seed, defeatedAt.x, defeatedAt.z),
+                    defeatedType == EnemyType.GOBLIN ? EquipmentRules.EnemyKind.GOBLIN : EquipmentRules.EnemyKind.GRAVEBORN);
+            cinderShard += drop.cinderShard();
             enemy.removeFromParent();
             kills++;
-            announce(kind == CombatRules.AttackKind.HEAVY ? "Heavy strike defeats the enemy." : "Enemy defeated.");
+            announce((kind == CombatRules.AttackKind.HEAVY ? "Heavy strike defeats the enemy." : "Enemy defeated.")
+                    + (drop.cinderShard() > 0 ? " + cinder shard" : ""));
         } else {
             enemy.setUserData("hp", hp);
             CombatRules.EnemyState state = CombatRules.applyStagger(enemyCombatState(enemy), attack.staggerSeconds());
@@ -772,11 +814,25 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         return parent instanceof Node node ? node.getUserData("buildIndex") : null;
     }
 
-    private void craftBlade() {
-        if (bladeCrafted) { announce("You already carry the Wanderer's Blade."); return; }
-        if (wood < 8 || stone < 4) { announce("Blade requires 8 wood + 4 stone."); return; }
-        wood -= 8; stone -= 4; bladeCrafted = true;
-        announce("Wanderer's Blade crafted.");
+    private void craftOrEquip(EquipmentRules.Weapon weapon) {
+        if (craftedWeapons.contains(weapon)) {
+            equippedWeapon = weapon;
+            announce("Equipped " + weapon.label() + ".");
+            return;
+        }
+        EquipmentRules.Materials materials = new EquipmentRules.Materials(wood, stone, ironOre, mistResin, cinderShard);
+        if (!EquipmentRules.canCraft(weapon, materials)) {
+            EquipmentRules.Recipe r = EquipmentRules.recipe(weapon);
+            announce(weapon.label() + " needs " + r.wood() + " wood, " + r.stone() + " stone, "
+                    + r.ironOre() + " iron, " + r.mistResin() + " resin, " + r.cinderShard() + " cinder.");
+            return;
+        }
+        EquipmentRules.Materials after = EquipmentRules.spend(weapon, materials);
+        wood = after.wood(); stone = after.stone(); ironOre = after.ironOre(); mistResin = after.mistResin(); cinderShard = after.cinderShard();
+        craftedWeapons.add(weapon);
+        equippedWeapon = weapon;
+        bladeCrafted = craftedWeapons.contains(EquipmentRules.Weapon.WANDERERS_BLADE);
+        announce(weapon.label() + " crafted and equipped.");
     }
 
     private void placeBuild() {
@@ -930,13 +986,13 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         boolean swimming = WaterPhysics.isSwimming(footY, SEA_LEVEL);
         boolean wading = WaterPhysics.isWading(footY, SEA_LEVEL);
         String objective = objectiveText();
-        String resourcesText = "WOOD  " + wood + "    STONE  " + stone + "    BERRIES  " + berries + "    KILLS  " + kills;
+        String resourcesText = "WOOD " + wood + "  STONE " + stone + "  IRON " + ironOre + "  RESIN " + mistResin + "  CINDER " + cinderShard + "  KILLS " + kills;
         if (breath < 99.5f) resourcesText += "    BREATH  " + Math.round(breath);
-        String tool = "TERRAIN • " + toolMode.label.toUpperCase(Locale.ROOT) + " • " + String.format(Locale.ROOT, "%.1fm", brushRadius);
+        String tool = equippedWeapon.label().toUpperCase(Locale.ROOT) + "  |  TERRAIN " + toolMode.label.toUpperCase(Locale.ROOT) + " " + String.format(Locale.ROOT, "%.1fm", brushRadius);
         String detail;
         if (swimming) detail = "SWIMMING • Space rise   Ctrl dive   Shift push     |     stamina drains in deep water";
         else if (wading) detail = "WADING • movement slowed     |     RMB/G terrain   B build   Q place   X remove";
-        else detail = "LMB light attack   MMB heavy attack     |     RMB/G terrain   T mode   B build   Q place";
+        else detail = "LMB light  MMB heavy   1-4 craft/equip weapons   |   RMB/G terrain   B build   Q place";
         hud.update(health, stamina, hunger, objective, resourcesText, tool, detail);
     }
 
@@ -944,9 +1000,10 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         long digs = terrain.edits().stream().filter(edit -> edit.mode() == VolumetricTerrain.EditMode.DIG).count();
         if (digs < 3) return "Carve a tunnel into a hillside (" + digs + "/3 digs)";
         if (builds.stream().noneMatch(record -> record.type == BuildType.FLOOR)) return "Gather wood and place a floor with Q";
-        if (!bladeCrafted) return "Craft the Wanderer's Blade [1]";
+        if (!craftedWeapons.contains(EquipmentRules.Weapon.WANDERERS_BLADE)) return "Craft the Wanderer's Blade [1]";
         if (kills < 4) return "Defeat 4 creatures (" + kills + "/4)";
-        return "Sandbox open: explore the larger streamed frontier, cross water, excavate caves and build";
+        if (craftedWeapons.size() < 2) return "Explore a frontier region and craft an advanced weapon [2-4]";
+        return "Sandbox open: master frontier gear, caves, water, combat and building";
     }
 
     private void respawn() {
@@ -965,7 +1022,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
 
     private void saveGame() {
         SaveData data = new SaveData(seed, playerX, footY, playerZ, health, stamina, hunger, dayClock, wood, stone, berries,
-                kills, bladeCrafted, toolMode, buildType, buildYaw, brushRadius, terrain.encodeEdits(),
+                ironOre, mistResin, cinderShard, kills, bladeCrafted, equippedWeapon, EnumSet.copyOf(craftedWeapons),
+                toolMode, buildType, buildYaw, brushRadius, terrain.encodeEdits(),
                 new HashSet<>(removedResources), new ArrayList<>(builds));
         try { data.save(); } catch (IOException ex) { System.err.println("Save failed: " + ex.getMessage()); }
     }
@@ -1030,8 +1088,13 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         private final int wood;
         private final int stone;
         private final int berries;
+        private final int ironOre;
+        private final int mistResin;
+        private final int cinderShard;
         private final int kills;
         private final boolean blade;
+        private final EquipmentRules.Weapon equippedWeapon;
+        private final Set<EquipmentRules.Weapon> craftedWeapons;
         private final ToolMode toolMode;
         private final BuildType buildType;
         private final float buildYaw;
@@ -1041,11 +1104,14 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         private final List<BuildRecord> builds;
 
         SaveData(long seed, float x, float footY, float z, float health, float stamina, float hunger, float dayClock,
-                 int wood, int stone, int berries, int kills, boolean blade, ToolMode toolMode, BuildType buildType,
-                 float buildYaw, float brushRadius, String edits, Set<String> removed, List<BuildRecord> builds) {
+                 int wood, int stone, int berries, int ironOre, int mistResin, int cinderShard, int kills, boolean blade,
+                 EquipmentRules.Weapon equippedWeapon, Set<EquipmentRules.Weapon> craftedWeapons,
+                 ToolMode toolMode, BuildType buildType, float buildYaw, float brushRadius, String edits, Set<String> removed, List<BuildRecord> builds) {
             this.seed = seed; this.x = x; this.footY = footY; this.z = z; this.health = health; this.stamina = stamina;
             this.hunger = hunger; this.dayClock = dayClock; this.wood = wood; this.stone = stone; this.berries = berries;
-            this.kills = kills; this.blade = blade; this.toolMode = toolMode; this.buildType = buildType;
+            this.ironOre = ironOre; this.mistResin = mistResin; this.cinderShard = cinderShard;
+            this.kills = kills; this.blade = blade; this.equippedWeapon = equippedWeapon; this.craftedWeapons = craftedWeapons;
+            this.toolMode = toolMode; this.buildType = buildType;
             this.buildYaw = buildYaw; this.brushRadius = brushRadius; this.edits = edits; this.removed = removed; this.builds = builds;
         }
 
@@ -1060,15 +1126,24 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
                 List<BuildRecord> builds = new ArrayList<>();
                 String buildsText = p.getProperty("builds", "");
                 if (!buildsText.isBlank()) for (String item : buildsText.split(";")) if (!item.isBlank()) builds.add(BuildRecord.decode(item));
+                boolean oldBlade = Boolean.parseBoolean(p.getProperty("blade", "false"));
+                Set<EquipmentRules.Weapon> crafted = EnumSet.noneOf(EquipmentRules.Weapon.class);
+                String craftedText = p.getProperty("craftedWeapons", "");
+                if (!craftedText.isBlank()) for (String item : craftedText.split(",")) if (!item.isBlank()) crafted.add(EquipmentRules.Weapon.valueOf(item));
+                if (oldBlade) crafted.add(EquipmentRules.Weapon.WANDERERS_BLADE);
+                EquipmentRules.Weapon equipped = EquipmentRules.Weapon.valueOf(p.getProperty("equippedWeapon",
+                        oldBlade ? EquipmentRules.Weapon.WANDERERS_BLADE.name() : EquipmentRules.Weapon.FISTS.name()));
                 return new SaveData(Long.parseLong(p.getProperty("seed")), Float.parseFloat(p.getProperty("x", "0")),
                         Float.parseFloat(p.getProperty("footY", "0")), Float.parseFloat(p.getProperty("z", "0")),
                         Float.parseFloat(p.getProperty("health", "100")), Float.parseFloat(p.getProperty("stamina", "100")),
                         Float.parseFloat(p.getProperty("hunger", "100")), Float.parseFloat(p.getProperty("dayClock", "0.18")),
                         Integer.parseInt(p.getProperty("wood", "0")), Integer.parseInt(p.getProperty("stone", "0")),
-                        Integer.parseInt(p.getProperty("berries", "0")), Integer.parseInt(p.getProperty("kills", "0")),
-                        Boolean.parseBoolean(p.getProperty("blade", "false")), ToolMode.valueOf(p.getProperty("toolMode", ToolMode.DIG.name())),
-                        BuildType.valueOf(p.getProperty("buildType", BuildType.FLOOR.name())), Float.parseFloat(p.getProperty("buildYaw", "0")),
-                        Float.parseFloat(p.getProperty("brushRadius", "2.6")), p.getProperty("edits", ""), removed, builds);
+                        Integer.parseInt(p.getProperty("berries", "0")), Integer.parseInt(p.getProperty("ironOre", "0")),
+                        Integer.parseInt(p.getProperty("mistResin", "0")), Integer.parseInt(p.getProperty("cinderShard", "0")),
+                        Integer.parseInt(p.getProperty("kills", "0")), oldBlade, equipped, crafted,
+                        ToolMode.valueOf(p.getProperty("toolMode", ToolMode.DIG.name())), BuildType.valueOf(p.getProperty("buildType", BuildType.FLOOR.name())),
+                        Float.parseFloat(p.getProperty("buildYaw", "0")), Float.parseFloat(p.getProperty("brushRadius", "2.6")),
+                        p.getProperty("edits", ""), removed, builds);
             } catch (RuntimeException | IOException ex) {
                 System.err.println("Ignoring invalid cave save: " + ex.getMessage());
                 return null;
@@ -1082,7 +1157,11 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             p.setProperty("x", Float.toString(x)); p.setProperty("footY", Float.toString(footY)); p.setProperty("z", Float.toString(z));
             p.setProperty("health", Float.toString(health)); p.setProperty("stamina", Float.toString(stamina)); p.setProperty("hunger", Float.toString(hunger));
             p.setProperty("dayClock", Float.toString(dayClock)); p.setProperty("wood", Integer.toString(wood)); p.setProperty("stone", Integer.toString(stone));
-            p.setProperty("berries", Integer.toString(berries)); p.setProperty("kills", Integer.toString(kills)); p.setProperty("blade", Boolean.toString(blade));
+            p.setProperty("berries", Integer.toString(berries)); p.setProperty("ironOre", Integer.toString(ironOre));
+            p.setProperty("mistResin", Integer.toString(mistResin)); p.setProperty("cinderShard", Integer.toString(cinderShard));
+            p.setProperty("kills", Integer.toString(kills)); p.setProperty("blade", Boolean.toString(blade));
+            p.setProperty("equippedWeapon", equippedWeapon.name());
+            p.setProperty("craftedWeapons", craftedWeapons.stream().map(Enum::name).sorted().reduce((a, b) -> a + "," + b).orElse(""));
             p.setProperty("toolMode", toolMode.name()); p.setProperty("buildType", buildType.name()); p.setProperty("buildYaw", Float.toString(buildYaw));
             p.setProperty("brushRadius", Float.toString(brushRadius)); p.setProperty("edits", edits); p.setProperty("removed", String.join(";", removed));
             StringBuilder buildText = new StringBuilder();
