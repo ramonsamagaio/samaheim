@@ -27,6 +27,7 @@ import com.jme3.scene.shape.Box;
 import com.jme3.scene.shape.Sphere;
 import com.jme3.system.AppSettings;
 import com.jme3.util.BufferUtils;
+import com.samaheim.game.CombatRules;
 import com.samaheim.ui.SamaheimHud;
 import com.samaheim.world.BuildingPhysics;
 import com.samaheim.world.CaveCharacterPhysics;
@@ -206,6 +207,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         inputManager.addMapping("SwimDown", new KeyTrigger(KeyInput.KEY_LCONTROL));
         inputManager.addMapping("Interact", new KeyTrigger(KeyInput.KEY_E));
         inputManager.addMapping("Attack", new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
+        inputManager.addMapping("HeavyAttack", new MouseButtonTrigger(MouseInput.BUTTON_MIDDLE));
         inputManager.addMapping("Terraform", new MouseButtonTrigger(MouseInput.BUTTON_RIGHT), new KeyTrigger(KeyInput.KEY_G));
         inputManager.addMapping("ToolMode", new KeyTrigger(KeyInput.KEY_T));
         inputManager.addMapping("BrushSmaller", new KeyTrigger(KeyInput.KEY_Z));
@@ -217,7 +219,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         inputManager.addMapping("Dismantle", new KeyTrigger(KeyInput.KEY_X));
         inputManager.addMapping("Eat", new KeyTrigger(KeyInput.KEY_R));
         inputManager.addMapping("Save", new KeyTrigger(KeyInput.KEY_F5));
-        inputManager.addListener(this, "Forward", "Back", "Left", "Right", "Sprint", "Jump", "SwimDown", "Interact", "Attack",
+        inputManager.addListener(this, "Forward", "Back", "Left", "Right", "Sprint", "Jump", "SwimDown", "Interact", "Attack", "HeavyAttack",
                 "Terraform", "ToolMode", "BrushSmaller", "BrushLarger", "CraftBlade", "BuildMode", "RotateBuild",
                 "Build", "Dismantle", "Eat", "Save");
     }
@@ -366,7 +368,9 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         enemy.setUserData("kind", "ENEMY");
         enemy.setUserData("enemyType", type.name());
         enemy.setUserData("hp", type.hp);
-        enemy.setUserData("attackClock", 0f);
+        enemy.setUserData("attackCooldown", 0f);
+        enemy.setUserData("attackWindup", 0f);
+        enemy.setUserData("staggerClock", 0f);
         enemy.setLocalTranslation(p);
         Geometry body = new Geometry("body", new Box(0.34f, 0.78f, 0.30f));
         body.setMaterial(lit(type.color));
@@ -402,7 +406,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             case "Jump" -> { jumpHeld = isPressed; if (isPressed) jumpRequested = true; }
             case "SwimDown" -> swimDown = isPressed;
             case "Interact" -> { if (isPressed) interact(); }
-            case "Attack" -> { if (isPressed) attack(); }
+            case "Attack" -> { if (isPressed) attack(CombatRules.AttackKind.LIGHT); }
+            case "HeavyAttack" -> { if (isPressed) attack(CombatRules.AttackKind.HEAVY); }
             case "Terraform" -> { if (isPressed) terraform(); }
             case "ToolMode" -> { if (isPressed) cycleToolMode(); }
             case "BrushSmaller" -> { if (isPressed) changeBrush(-0.35f); }
@@ -529,13 +534,23 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         for (Spatial spatial : new ArrayList<>(enemies.getChildren())) {
             if (!(spatial instanceof Node enemy)) continue;
             EnemyType type = EnemyType.valueOf(enemy.getUserData("enemyType"));
+            CombatRules.EnemyAttack attack = CombatRules.enemyAttack(combatArchetype(type));
+            CombatRules.EnemyState state = enemyCombatState(enemy);
             Vector3f p = enemy.getLocalTranslation();
             Vector3f to = player.subtract(p);
             float verticalDifference = Math.abs(to.y);
             to.y = 0f;
             float distance = to.length();
-            float clock = enemy.<Float>getUserData("attackClock") - tpf;
-            if (distance < type.notice && distance > 1.35f && verticalDifference < 4.5f) {
+            boolean targetInRange = distance <= attack.range() && verticalDifference < 1.7f;
+
+            if (targetInRange && state.cooldown() <= 0f && state.windup() <= 0f && state.stagger() <= 0f) {
+                state = CombatRules.beginEnemyWindup(state, attack);
+            }
+            boolean committed = state.windup() > 0f || state.stagger() > 0f;
+            CombatRules.EnemyTick tick = CombatRules.tickEnemy(state, attack, tpf, targetInRange);
+            state = tick.state();
+
+            if (!committed && distance < type.notice && distance > attack.range() * 0.88f && verticalDifference < 4.5f) {
                 to.normalizeLocal();
                 CaveCharacterPhysics.HorizontalMove move = CaveCharacterPhysics.moveHorizontal(terrain, p.x, p.y, p.z,
                         to.x * type.speed * tpf, to.z * type.speed * tpf, 0.28f, 1.55f, 0.38f);
@@ -543,13 +558,47 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
                 float y = Float.isFinite(floor) ? floor : move.footY();
                 enemy.setLocalTranslation(move.x(), y, move.z());
             }
-            if (distance <= 1.45f && verticalDifference < 1.7f && clock <= 0f) {
-                health = Math.max(0f, health - type.damage);
-                clock = type.delay;
-                announce(type.label + " hits you.");
+
+            if (tick.strike()) {
+                health = Math.max(0f, health - attack.damage());
+                announce(type.label + " hits for " + Math.round(attack.damage()) + ".");
             }
-            enemy.setUserData("attackClock", clock);
+            setEnemyCombatState(enemy, state);
+            updateEnemyTelegraph(enemy, type, state, attack);
         }
+    }
+
+    private CombatRules.EnemyArchetype combatArchetype(EnemyType type) {
+        return type == EnemyType.GOBLIN ? CombatRules.EnemyArchetype.GOBLIN : CombatRules.EnemyArchetype.GRAVEBORN;
+    }
+
+    private CombatRules.EnemyState enemyCombatState(Node enemy) {
+        return new CombatRules.EnemyState(
+                enemy.<Float>getUserData("attackCooldown"),
+                enemy.<Float>getUserData("attackWindup"),
+                enemy.<Float>getUserData("staggerClock"));
+    }
+
+    private void setEnemyCombatState(Node enemy, CombatRules.EnemyState state) {
+        enemy.setUserData("attackCooldown", state.cooldown());
+        enemy.setUserData("attackWindup", state.windup());
+        enemy.setUserData("staggerClock", state.stagger());
+    }
+
+    private void updateEnemyTelegraph(Node enemy, EnemyType type, CombatRules.EnemyState state, CombatRules.EnemyAttack attack) {
+        Spatial spatial = enemy.getChild("body");
+        if (!(spatial instanceof Geometry body)) return;
+        float telegraph = CombatRules.telegraphIntensity(state.windup(), attack);
+        float stagger = Math.min(1f, state.stagger() * 2.4f);
+        ColorRGBA color = new ColorRGBA(
+                Math.min(1f, type.color.r * (1f - telegraph) + telegraph),
+                Math.min(1f, type.color.g * (1f - telegraph) + 0.18f * telegraph + 0.18f * stagger),
+                Math.min(1f, type.color.b * (1f - telegraph) + 0.04f * telegraph + 0.62f * stagger),
+                1f);
+        body.getMaterial().setColor("Diffuse", color);
+        body.getMaterial().setColor("Ambient", color.mult(0.62f));
+        float pulse = 1f + telegraph * 0.14f;
+        body.setLocalScale(pulse, 1f, pulse);
     }
 
     private void updateSurvival(float tpf) {
@@ -676,20 +725,31 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         announce("Nothing usable in reach.");
     }
 
-    private void attack() {
-        if (attackCooldown > 0f) return;
-        attackCooldown = bladeCrafted ? 0.48f : 0.72f;
-        Node enemy = raycastNode(enemies, 3.6f);
+    private void attack(CombatRules.AttackKind kind) {
+        if (WaterPhysics.isSwimming(footY, SEA_LEVEL)) {
+            announce("You cannot swing effectively while swimming.");
+            return;
+        }
+        CombatRules.PlayerAttack attack = CombatRules.playerAttack(bladeCrafted, kind);
+        if (!CombatRules.canAttack(stamina, attackCooldown, attack)) {
+            if (attackCooldown <= 0f) announce("Too exhausted to attack.");
+            return;
+        }
+        stamina = CombatRules.spendStamina(stamina, attack);
+        attackCooldown = attack.cooldownSeconds();
+        Node enemy = raycastNode(enemies, attack.range());
         if (enemy == null) return;
-        float damage = bladeCrafted ? 22f : 7f;
-        float hp = enemy.<Float>getUserData("hp") - damage;
+
+        float hp = enemy.<Float>getUserData("hp") - attack.damage();
         if (hp <= 0f) {
             enemy.removeFromParent();
             kills++;
-            announce("Enemy defeated.");
+            announce(kind == CombatRules.AttackKind.HEAVY ? "Heavy strike defeats the enemy." : "Enemy defeated.");
         } else {
             enemy.setUserData("hp", hp);
-            announce("Hit for " + Math.round(damage) + ".");
+            CombatRules.EnemyState state = CombatRules.applyStagger(enemyCombatState(enemy), attack.staggerSeconds());
+            setEnemyCombatState(enemy, state);
+            announce((kind == CombatRules.AttackKind.HEAVY ? "Heavy hit for " : "Hit for ") + Math.round(attack.damage()) + ".");
         }
     }
 
@@ -876,7 +936,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         String detail;
         if (swimming) detail = "SWIMMING • Space rise   Ctrl dive   Shift push     |     stamina drains in deep water";
         else if (wading) detail = "WADING • movement slowed     |     RMB/G terrain   B build   Q place   X remove";
-        else detail = "RMB/G use   T mode   Z/C size     |     B build piece   Q place   F rotate   X remove";
+        else detail = "LMB light attack   MMB heavy attack     |     RMB/G terrain   T mode   B build   Q place";
         hud.update(health, stamina, hunger, objective, resourcesText, tool, detail);
     }
 
