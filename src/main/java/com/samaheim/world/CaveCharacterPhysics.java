@@ -70,8 +70,8 @@ public final class CaveCharacterPhysics {
 
         float bottomCenter = footY + radius;
         float topCenter = footY + height - radius;
-        float startY = footY + 0.04f;
-        float endY = footY + height - 0.04f;
+        float startY = footY + 0.08f;
+        float endY = footY + height + 0.04f;
         int verticalSamples = Math.max(6, (int) Math.ceil(height / 0.30f));
 
         for (int i = 0; i <= verticalSamples; i++) {
@@ -131,6 +131,15 @@ public final class CaveCharacterPhysics {
         float y = footY;
         for (int i = 0; i < steps; i++) {
             float next = y + sy;
+
+            if (sy < 0f) {
+                float floor = terrain.findFloor(x, z, y + 0.28f, 0.85f);
+                if (Float.isFinite(floor) && next <= floor + FOOT_OFFSET) {
+                    float landedY = firstClearLanding(terrain, x, z, floor, y, radius, height);
+                    return new VerticalMove(landedY, true, false);
+                }
+            }
+
             if (capsuleClear(terrain, x, next, z, radius, height)) {
                 y = next;
                 continue;
@@ -138,20 +147,21 @@ public final class CaveCharacterPhysics {
 
             if (sy < 0f) {
                 float floor = terrain.findFloor(x, z, y + 0.36f, 0.95f);
-                if (Float.isFinite(floor)) {
-                    for (float offset = FOOT_OFFSET; offset <= 0.16f; offset += 0.02f) {
-                        float landedY = floor + offset;
-                        if (landedY <= y + 0.10f && capsuleClear(terrain, x, landedY, z, radius, height)) {
-                            y = landedY;
-                            break;
-                        }
-                    }
-                }
+                if (Float.isFinite(floor)) y = firstClearLanding(terrain, x, z, floor, y, radius, height);
                 return new VerticalMove(y, true, false);
             }
             return new VerticalMove(y, false, true);
         }
         return new VerticalMove(y, false, false);
+    }
+
+    private static float firstClearLanding(VolumetricTerrain terrain, float x, float z, float floor, float fallbackY,
+                                           float radius, float height) {
+        for (float offset = FOOT_OFFSET; offset <= 0.18f; offset += 0.02f) {
+            float candidate = floor + offset;
+            if (candidate <= fallbackY + 0.12f && capsuleClear(terrain, x, candidate, z, radius, height)) return candidate;
+        }
+        return fallbackY;
     }
 
     public static boolean grounded(VolumetricTerrain terrain, float x, float footY, float z, float radius) {
