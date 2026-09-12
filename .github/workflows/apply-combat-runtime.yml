@@ -1,0 +1,35 @@
+name: Apply Combat Runtime
+
+on:
+  push:
+    branches: [ 'work/combat-runtime' ]
+    paths:
+      - 'tools/apply-combat-runtime.py'
+      - '.github/workflows/apply-combat-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.event.head_commit.message != 'Integrate combat depth into graphical runtime' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/combat-runtime
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply runtime integration
+        run: python tools/apply-combat-runtime.py
+      - name: Commit integration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/com/samaheim/SamaheimCaveGame.java
+          git diff --cached --quiet && exit 0
+          git commit -m "Integrate combat depth into graphical runtime"
+          git push origin HEAD:work/combat-runtime
