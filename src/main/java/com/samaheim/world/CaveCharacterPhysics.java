@@ -72,7 +72,7 @@ public final class CaveCharacterPhysics {
         float topCenter = footY + height - radius;
         float startY = footY + 0.08f;
         float endY = footY + height + 0.04f;
-        int verticalSamples = Math.max(6, (int) Math.ceil(height / 0.30f));
+        int verticalSamples = Math.max(4, (int) Math.ceil(height / 0.45f));
 
         for (int i = 0; i <= verticalSamples; i++) {
             float y = startY + (endY - startY) * i / verticalSamples;
