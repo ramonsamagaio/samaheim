@@ -8,7 +8,7 @@ import java.util.List;
 public final class DungeonRules {
     public static final float CENTER_Y = -13.0f;
     public static final float CARVE_RADIUS = 4.6f;
-    public static final float CARVE_STRENGTH = 8.0f;
+    public static final float CARVE_STRENGTH = 28.0f;
 
     private DungeonRules() { }
 
