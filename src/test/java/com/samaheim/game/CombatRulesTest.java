@@ -62,4 +62,17 @@ final class CombatRulesTest {
         assertTrue(tick.state().stagger() > 0f);
         assertTrue(tick.state().windup() <= 0f);
     }
+
+    @Test
+    void frontierArchetypesCreateDifferentCombatProblems() {
+        CombatRules.EnemyAttack brute = CombatRules.enemyAttack(CombatRules.EnemyArchetype.HIGHLAND_BRUTE);
+        CombatRules.EnemyAttack stalker = CombatRules.enemyAttack(CombatRules.EnemyArchetype.MIRE_STALKER);
+        CombatRules.EnemyAttack wraith = CombatRules.enemyAttack(CombatRules.EnemyArchetype.ASH_WRAITH);
+
+        assertTrue(brute.damage() > stalker.damage());
+        assertTrue(brute.windupSeconds() > stalker.windupSeconds());
+        assertTrue(stalker.recoverySeconds() < brute.recoverySeconds());
+        assertTrue(wraith.range() > brute.range());
+        assertTrue(wraith.damage() > stalker.damage());
+    }
 }
