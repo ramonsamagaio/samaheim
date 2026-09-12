@@ -53,8 +53,16 @@ public final class VolumetricTerrain {
             for (int x = 0; x < nx; x++) {
                 float wx = worldX(x);
                 float surface = WorldMath.height(seed, wx, wz);
+                FrontierCaveMath.ColumnProfile caveProfile = FrontierCaveMath.columnProfile(seed, wx, wz);
                 for (int y = 0; y < ny; y++) {
-                    density[index(x, y, z)] = surface - worldY(y);
+                    float wy = worldY(y);
+                    float baseDensity = surface - wy;
+                    if (!caveProfile.enabled()) {
+                        density[index(x, y, z)] = baseDensity;
+                        continue;
+                    }
+                    float caveDensity = FrontierCaveMath.caveDensity(caveProfile, surface - wy);
+                    density[index(x, y, z)] = caveDensity < 7.99f ? Math.min(baseDensity, caveDensity) : baseDensity;
                 }
             }
         }
@@ -268,6 +276,11 @@ public final class VolumetricTerrain {
         float chunkMaxX = worldX(endX);
         float chunkMinZ = worldZ(startZ);
         float chunkMaxZ = worldZ(endZ);
+        float farX = Math.max(Math.abs(chunkMinX), Math.abs(chunkMaxX));
+        float farZ = Math.max(Math.abs(chunkMinZ), Math.abs(chunkMaxZ));
+        if (Math.max(farX, farZ) > FrontierCaveMath.CAVE_START_EXTENT) {
+            minSurface -= FrontierCaveMath.MAX_CAVE_DEPTH + spacing * 2f;
+        }
         for (Edit edit : edits) {
             float nearestX = clamp(edit.x, chunkMinX, chunkMaxX);
             float nearestZ = clamp(edit.z, chunkMinZ, chunkMaxZ);
