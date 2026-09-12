@@ -4,57 +4,76 @@
 
 ## Current state
 
-Pre-alpha first playable on branch `work/first-playable` / PR #1.
+Pre-alpha graphical sandbox on `main`.
 
-The current vertical slice already includes:
+The current playable build includes:
 
-- seeded procedural terrain
-- first-person WASD + mouse traversal
+- fully volumetric editable terrain rather than a heightfield-only world
+- real 3D digging, tunnels, overhangs and persistent caves
+- first-person WASD + mouse traversal with gravity, jumping and cave collision
 - health, stamina and hunger
-- wood, stone, berry and arcane-dust gathering/economy
-- crafting a first weapon and campfire kit
-- goblin and graveborn combat
-- roaming enemy reinforcement
-- day/night lighting cycle
-- ruins and three Arcane Seal exploration objectives
-- quest/progression state machine
-- campfire placement
-- death/respawn loop
-- manual save (`F5`) and autosave
-- deterministic unit tests and GitHub CI
+- persistent gathering of wood, stone and berries
+- melee combat and roaming enemies
+- day/night lighting
+- graphical HUD and projected terrain brush preview
+- terrain modes for digging, adding earth and smoothing
+- floors, walls, ramps, doors and campfires
+- build rotation, dismantling and persisted structures
+- save/load for terrain edits and world state
+- deterministic regression tests and GitHub CI
 
-## Controls
+## Windows playable
+
+You no longer need to use `gradle run` just to play the current build.
+
+Every green Windows build produces an artifact called **Samaheim-Windows** in GitHub Actions. Download it, unzip it and double-click:
+
+```text
+Samaheim\Samaheim.exe
+```
+
+The Windows package contains its own private Java runtime. The target PC does **not** need Java or Gradle installed.
+
+To build the Windows executable locally from a development checkout with JDK 21 + Gradle available:
+
+```powershell
+.\tools\package-windows.ps1
+```
+
+Output:
+
+```text
+build\jpackage\Samaheim\Samaheim.exe
+build\Samaheim-Windows.zip
+```
+
+## Current controls
 
 | Input | Action |
 | --- | --- |
 | WASD | Move |
 | Mouse | Look |
 | Left Shift | Sprint |
-| E | Gather / interact |
+| Space | Jump |
+| E | Gather / interact / operate doors |
 | Left mouse | Attack |
+| Right mouse or G | Use terrain tool |
+| T | Cycle terrain tool mode |
+| Z / C | Decrease / increase terrain brush |
 | 1 | Craft Wanderer's Blade |
-| 2 | Craft campfire kit |
-| Q | Place campfire kit |
-| R | Eat emberberry |
+| B | Cycle build piece |
+| Q | Place build piece |
+| F | Rotate build piece |
+| X | Dismantle aimed build piece |
+| R | Eat berry |
 | F5 | Save |
 
-## First-hour critical path
+## Development run
 
-1. Gather 8 wood and 4 stone.
-2. Craft the Wanderer's Blade.
-3. Defeat three goblin scouts.
-4. Explore the world and awaken three Arcane Seals.
-5. Build a campfire.
-6. Continue surviving, exploring and fighting through the day/night cycle.
-
-The progression system deliberately tolerates completing objectives out of order so exploration cannot accidentally softlock the quest chain.
-
-## Running locally
-
-Requirements:
+Requirements for developers:
 
 - JDK 21
-- Gradle 8.10+ (until a Gradle wrapper is committed)
+- Gradle 8.10+
 
 ```bash
 gradle run
@@ -72,19 +91,20 @@ gradle clean test
 - jMonkeyEngine 3.9.0-stable
 - Gradle
 - JUnit 5
+- jpackage for self-contained Windows app images
 
 ## Quality target
 
-The project is not considered "done" merely because it launches. The working target is **9/10 or better** against a strict first-hour rubric: stable build, reliable traversal, exploration, survival, progression, combat, building, save/load integrity, pacing and resistance to repetition.
+The project is not considered complete merely because it launches or because systems exist in isolation. Quality scoring is based on the **actual graphical playable runtime**. CI is a required gate, but headless systems and tests do not receive gameplay credit until they are wired into the build the player actually opens.
 
-See [`docs/QUALITY_LOOP.md`](docs/QUALITY_LOOP.md) for the 20-pass review plan and current score history.
+A 9/10 score requires evidence comparable to an instrumented graphical play session of roughly one hour without progression-blocking bugs, stuck traversal or obvious repetitive stagnation.
 
 ## Save location
 
-The prototype writes a small properties-based save to:
+The pre-alpha save is written to:
 
 ```text
 ~/.samaheim/save.properties
 ```
 
-This format is intentionally simple during pre-alpha and will be migrated once world-state persistence becomes richer.
+The properties format is intentionally simple during rapid pre-alpha iteration and will be migrated as world persistence grows.
