@@ -32,6 +32,7 @@ import com.samaheim.game.DungeonRules;
 import com.samaheim.game.EncounterRules;
 import com.samaheim.game.EquipmentRules;
 import com.samaheim.game.NightCampRules;
+import com.samaheim.game.ResourceRegrowthRules;
 import com.samaheim.ui.SamaheimHud;
 import com.samaheim.world.BuildingPhysics;
 import com.samaheim.world.CaveCharacterPhysics;
@@ -114,6 +115,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     private float hunger = 100f;
     private float breath = 100f;
     private float dayClock = 0.18f;
+    private long dawnIndex;
     private float attackCooldown;
     private float spawnClock;
     private float saveClock;
@@ -202,6 +204,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         stamina = clamp100(save.stamina);
         hunger = clamp100(save.hunger);
         dayClock = Math.max(0f, Math.min(1f, save.dayClock));
+        dawnIndex = Math.max(0L, save.dawnIndex);
         wood = Math.max(0, save.wood);
         stone = Math.max(0, save.stone);
         berries = Math.max(0, save.berries);
@@ -348,9 +351,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
 
     private void spawnWorld() {
         Random random = new Random(seed ^ 0x51A9L);
-        for (int i = 0; i < 312; i++) spawnResource("tree-" + i, ResourceType.TREE, random, 16f);
-        for (int i = 0; i < 224; i++) spawnResource("rock-" + i, ResourceType.ROCK, random, 12f);
-        for (int i = 0; i < 120; i++) spawnResource("berry-" + i, ResourceType.BERRY, random, 10f);
+        spawnResources(random);
         for (int i = 0; i < 14; i++) {
             Vector3f point = randomSurfacePoint(random, 24f);
             WorldMath.Region region = WorldMath.region(seed, point.x, point.z);
@@ -358,10 +359,22 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         }
     }
 
+    private void spawnResources(Random random) {
+        for (int i = 0; i < 312; i++) spawnResource("tree-" + i, ResourceType.TREE, random, 16f);
+        for (int i = 0; i < 224; i++) spawnResource("rock-" + i, ResourceType.ROCK, random, 12f);
+        for (int i = 0; i < 120; i++) spawnResource("berry-" + i, ResourceType.BERRY, random, 10f);
+    }
+
+    private void rebuildResources() {
+        resources.detachAllChildren();
+        Random random = new Random(seed ^ 0x51A9L);
+        spawnResources(random);
+    }
+
     private void spawnResource(String id, ResourceType type, Random random, float safeRadius) {
-        if (removedResources.contains(id)) return;
         Vector3f p = randomSurfacePoint(random, safeRadius);
         float scale = random.nextFloat(0.82f, 1.28f);
+        if (removedResources.contains(id)) return;
         Node node = new Node(id);
         node.setUserData("kind", type.name());
         node.setUserData("resourceId", id);
@@ -882,7 +895,12 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
     }
 
     private void updateDayNight(float tpf) {
+        float previousClock = dayClock;
         dayClock = (dayClock + tpf / DAY_SECONDS) % 1f;
+        if (ResourceRegrowthRules.crossedDawn(previousClock, dayClock)) {
+            dawnIndex++;
+            regrowHarvestedResources();
+        }
         float angle = dayClock * FastMath.TWO_PI;
         float elevation = FastMath.sin(angle);
         float daylight = Math.clamp(elevation * 0.75f + 0.38f, 0.07f, 1f);
@@ -1294,6 +1312,14 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         announce("You rest by the fire. Morning breaks, wounds mend, and hunger still matters.");
     }
 
+    private void regrowHarvestedResources() {
+        List<String> returning = ResourceRegrowthRules.selectForRegrowth(removedResources, seed, dawnIndex);
+        if (returning.isEmpty()) return;
+        removedResources.removeAll(returning);
+        rebuildResources();
+        if (!inDungeon) announce("Dawn renews the wilds. " + returning.size() + " harvested resource sites return.");
+    }
+
     private void spawnRoamingEnemy() {
         Random random = new Random(seed ^ Float.floatToIntBits(dayClock) ^ kills * 131L);
         float angle = random.nextFloat() * FastMath.TWO_PI;
@@ -1356,7 +1382,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         float saveX = inDungeon ? dungeonReturnPoint.x : playerX;
         float saveY = inDungeon ? dungeonReturnPoint.y : footY;
         float saveZ = inDungeon ? dungeonReturnPoint.z : playerZ;
-        SaveData data = new SaveData(seed, saveX, saveY, saveZ, health, stamina, hunger, dayClock, wood, stone, berries,
+        SaveData data = new SaveData(seed, saveX, saveY, saveZ, health, stamina, hunger, dayClock, dawnIndex, wood, stone, berries,
                 ironOre, mistResin, cinderShard, kills, bladeCrafted, equippedWeapon, EnumSet.copyOf(craftedWeapons),
                 toolMode, buildType, buildYaw, brushRadius, terrain.encodeEdits(),
                 new HashSet<>(removedResources), new HashSet<>(lootedPois), new ArrayList<>(builds));
@@ -1423,6 +1449,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         private final float stamina;
         private final float hunger;
         private final float dayClock;
+        private final long dawnIndex;
         private final int wood;
         private final int stone;
         private final int berries;
@@ -1442,13 +1469,13 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
         private final Set<String> lootedPois;
         private final List<BuildRecord> builds;
 
-        SaveData(long seed, float x, float footY, float z, float health, float stamina, float hunger, float dayClock,
+        SaveData(long seed, float x, float footY, float z, float health, float stamina, float hunger, float dayClock, long dawnIndex,
                  int wood, int stone, int berries, int ironOre, int mistResin, int cinderShard, int kills, boolean blade,
                  EquipmentRules.Weapon equippedWeapon, Set<EquipmentRules.Weapon> craftedWeapons,
                  ToolMode toolMode, BuildType buildType, float buildYaw, float brushRadius, String edits,
                  Set<String> removed, Set<String> lootedPois, List<BuildRecord> builds) {
             this.seed = seed; this.x = x; this.footY = footY; this.z = z; this.health = health; this.stamina = stamina;
-            this.hunger = hunger; this.dayClock = dayClock; this.wood = wood; this.stone = stone; this.berries = berries;
+            this.hunger = hunger; this.dayClock = dayClock; this.dawnIndex = dawnIndex; this.wood = wood; this.stone = stone; this.berries = berries;
             this.ironOre = ironOre; this.mistResin = mistResin; this.cinderShard = cinderShard;
             this.kills = kills; this.blade = blade; this.equippedWeapon = equippedWeapon; this.craftedWeapons = craftedWeapons;
             this.toolMode = toolMode; this.buildType = buildType;
@@ -1481,6 +1508,7 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
                         Float.parseFloat(p.getProperty("footY", "0")), Float.parseFloat(p.getProperty("z", "0")),
                         Float.parseFloat(p.getProperty("health", "100")), Float.parseFloat(p.getProperty("stamina", "100")),
                         Float.parseFloat(p.getProperty("hunger", "100")), Float.parseFloat(p.getProperty("dayClock", "0.18")),
+                        Long.parseLong(p.getProperty("dawnIndex", "0")),
                         Integer.parseInt(p.getProperty("wood", "0")), Integer.parseInt(p.getProperty("stone", "0")),
                         Integer.parseInt(p.getProperty("berries", "0")), Integer.parseInt(p.getProperty("ironOre", "0")),
                         Integer.parseInt(p.getProperty("mistResin", "0")), Integer.parseInt(p.getProperty("cinderShard", "0")),
@@ -1500,7 +1528,8 @@ public final class SamaheimCaveGame extends SimpleApplication implements ActionL
             p.setProperty("seed", Long.toString(seed));
             p.setProperty("x", Float.toString(x)); p.setProperty("footY", Float.toString(footY)); p.setProperty("z", Float.toString(z));
             p.setProperty("health", Float.toString(health)); p.setProperty("stamina", Float.toString(stamina)); p.setProperty("hunger", Float.toString(hunger));
-            p.setProperty("dayClock", Float.toString(dayClock)); p.setProperty("wood", Integer.toString(wood)); p.setProperty("stone", Integer.toString(stone));
+            p.setProperty("dayClock", Float.toString(dayClock)); p.setProperty("dawnIndex", Long.toString(dawnIndex));
+            p.setProperty("wood", Integer.toString(wood)); p.setProperty("stone", Integer.toString(stone));
             p.setProperty("berries", Integer.toString(berries)); p.setProperty("ironOre", Integer.toString(ironOre));
             p.setProperty("mistResin", Integer.toString(mistResin)); p.setProperty("cinderShard", Integer.toString(cinderShard));
             p.setProperty("kills", Integer.toString(kills)); p.setProperty("blade", Boolean.toString(blade));
