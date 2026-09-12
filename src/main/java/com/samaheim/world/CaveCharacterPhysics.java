@@ -9,7 +9,8 @@ public final class CaveCharacterPhysics {
     private static final float HORIZONTAL_SUBSTEP = 0.14f;
     private static final float VERTICAL_SUBSTEP = 0.06f;
     private static final float FOOT_OFFSET = 0.04f;
-    private static final float CLEARANCE_DENSITY = 0.10f;
+    private static final float CLEARANCE_DENSITY = 0.18f;
+    private static final float AXIS_EPSILON = 0.00001f;
 
     private CaveCharacterPhysics() { }
 
@@ -44,11 +45,11 @@ public final class CaveCharacterPhysics {
             }
 
             boolean moved = false;
-            if (capsuleClear(terrain, nx, py, pz, radius, height)) {
+            if (Math.abs(sx) > AXIS_EPSILON && capsuleClear(terrain, nx, py, pz, radius, height)) {
                 px = nx;
                 moved = true;
             }
-            if (capsuleClear(terrain, px, py, nz, radius, height)) {
+            if (Math.abs(sz) > AXIS_EPSILON && capsuleClear(terrain, px, py, nz, radius, height)) {
                 pz = nz;
                 moved = true;
             }
@@ -69,9 +70,9 @@ public final class CaveCharacterPhysics {
 
         float bottomCenter = footY + radius;
         float topCenter = footY + height - radius;
-        float startY = footY + 0.035f;
-        float endY = footY + height - 0.035f;
-        int verticalSamples = Math.max(6, (int) Math.ceil(height / 0.28f));
+        float startY = footY + 0.04f;
+        float endY = footY + height - 0.04f;
+        int verticalSamples = Math.max(6, (int) Math.ceil(height / 0.30f));
 
         for (int i = 0; i <= verticalSamples; i++) {
             float y = startY + (endY - startY) * i / verticalSamples;
@@ -86,8 +87,8 @@ public final class CaveCharacterPhysics {
 
             if (terrain.sampleDensity(x, y, z) > CLEARANCE_DENSITY) return false;
             if (ringRadius < 0.035f) continue;
-            for (int ring = 0; ring < 12; ring++) {
-                float angle = ring * ((float) Math.PI * 2f / 12f);
+            for (int ring = 0; ring < 8; ring++) {
+                float angle = ring * ((float) Math.PI * 2f / 8f);
                 float sx = x + (float) Math.cos(angle) * ringRadius;
                 float sz = z + (float) Math.sin(angle) * ringRadius;
                 if (terrain.sampleDensity(sx, y, sz) > CLEARANCE_DENSITY) return false;
@@ -103,7 +104,7 @@ public final class CaveCharacterPhysics {
         for (float up = increment; up <= maxStepUp + 0.001f; up += increment) {
             float candidateY = footY + up;
             if (!capsuleClear(terrain, x, candidateY, z, radius, height)) continue;
-            float floor = terrain.findFloor(x, z, candidateY + 0.16f, maxStepUp + 0.35f);
+            float floor = terrain.findFloor(x, z, candidateY + 0.18f, maxStepUp + 0.40f);
             if (!Float.isFinite(floor)) continue;
             float supportedY = floor + FOOT_OFFSET;
             if (supportedY < footY - 0.08f || supportedY > footY + maxStepUp + 0.08f) continue;
@@ -115,7 +116,7 @@ public final class CaveCharacterPhysics {
     private static float snapDown(VolumetricTerrain terrain, float x, float footY, float z,
                                   float radius, float height, float maxStep) {
         float snapDistance = Math.max(0.18f, Math.min(0.58f, maxStep + 0.10f));
-        float floor = terrain.findFloor(x, z, footY + 0.12f, snapDistance + 0.12f);
+        float floor = terrain.findFloor(x, z, footY + 0.16f, snapDistance + 0.18f);
         if (!Float.isFinite(floor)) return footY;
         float candidate = floor + FOOT_OFFSET;
         if (candidate > footY + 0.08f || footY - candidate > snapDistance) return footY;
@@ -132,16 +133,23 @@ public final class CaveCharacterPhysics {
             float next = y + sy;
             if (capsuleClear(terrain, x, next, z, radius, height)) {
                 y = next;
-            } else {
-                if (sy < 0f) {
-                    float floor = terrain.findFloor(x, z, y + 0.10f, Math.max(0.24f, Math.abs(sy) + 0.18f));
-                    if (Float.isFinite(floor)) {
-                        float landedY = floor + FOOT_OFFSET;
-                        if (landedY <= y + 0.08f && capsuleClear(terrain, x, landedY, z, radius, height)) y = landedY;
+                continue;
+            }
+
+            if (sy < 0f) {
+                float floor = terrain.findFloor(x, z, y + 0.36f, 0.95f);
+                if (Float.isFinite(floor)) {
+                    for (float offset = FOOT_OFFSET; offset <= 0.16f; offset += 0.02f) {
+                        float landedY = floor + offset;
+                        if (landedY <= y + 0.10f && capsuleClear(terrain, x, landedY, z, radius, height)) {
+                            y = landedY;
+                            break;
+                        }
                     }
                 }
-                return new VerticalMove(y, sy < 0f, sy > 0f);
+                return new VerticalMove(y, true, false);
             }
+            return new VerticalMove(y, false, true);
         }
         return new VerticalMove(y, false, false);
     }
