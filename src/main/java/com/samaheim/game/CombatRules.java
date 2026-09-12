@@ -27,6 +27,9 @@ public final class CombatRules {
         return switch (type) {
             case GOBLIN -> new EnemyAttack(7f, 1.45f, 0.44f, 1.16f);
             case GRAVEBORN -> new EnemyAttack(11f, 1.52f, 0.72f, 1.42f);
+            case HIGHLAND_BRUTE -> new EnemyAttack(18f, 1.78f, 0.96f, 1.82f);
+            case MIRE_STALKER -> new EnemyAttack(8f, 1.62f, 0.26f, 0.78f);
+            case ASH_WRAITH -> new EnemyAttack(15f, 2.08f, 0.56f, 1.18f);
         };
     }
 
@@ -67,7 +70,7 @@ public final class CombatRules {
     }
 
     public enum AttackKind { LIGHT, HEAVY }
-    public enum EnemyArchetype { GOBLIN, GRAVEBORN }
+    public enum EnemyArchetype { GOBLIN, GRAVEBORN, HIGHLAND_BRUTE, MIRE_STALKER, ASH_WRAITH }
 
     public record PlayerAttack(float damage, float range, float staminaCost, float cooldownSeconds,
                                float staggerSeconds) { }
